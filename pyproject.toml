@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "ai-medical-dept"
+version = "0.1.0"
+description = "AI Medical Department — Multi-Agent Clinical Decision Support System"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "transformers>=4.47.0",
+    "peft>=0.13.0",
+    "trl>=0.12.0",
+    "accelerate>=0.30.0",
+    "bitsandbytes>=0.43.0",
+    "numpy>=1.26.0",
+    "Pillow>=10.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+serving = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.0.0",
+    "faiss-cpu>=1.8.0",
+]
+training = [
+    "datasets>=2.19.0",
+    "wandb>=0.17.0",
+    "scipy>=1.13.0",
+]
+segmentation = [
+    "lungmask>=0.2.20",
+    "SimpleITK>=2.3.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "pre-commit>=3.7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agents*", "training*", "serving*", "retrieval*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=agents --cov=training --cov=serving --cov-report=term-missing"

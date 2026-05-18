@@ -1,0 +1,18 @@
+base_model_id: google/medgemma-1.5-4b-it
+
+# LoRA adapter paths (relative to CHECKPOINT_DIR)
+lora_adapters:
+  radiology:  lora_radiology/
+  cardiology: lora_cardiology/
+  oncology:   lora_oncology/
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: bfloat16
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+
+generation:
+  max_new_tokens: 512
+  do_sample: false
+  temperature: 1.0

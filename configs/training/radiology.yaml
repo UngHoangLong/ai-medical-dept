@@ -1,0 +1,35 @@
+agent: radiology
+output_dir: ${CHECKPOINT_DIR}/lora_radiology
+
+data:
+  task_files:
+    - chest_abn_54_trainval.json
+    - covid19_trainval.json
+    - nodule_presence_trainval.json
+    - nodule_location_trainval.json
+    - nodule_size_trainval.json
+    - nodule_attenuation_trainval.json
+    - nodule_margin_trainval.json
+  data_root: ${DATA_ROOT}
+  max_slices: 85
+  image_size: 896
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  bias: none
+
+training:
+  num_epochs: 3
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  bf16: true
+  dataloader_num_workers: 4
+  save_steps: 500
+  logging_steps: 50
+  report_to: wandb

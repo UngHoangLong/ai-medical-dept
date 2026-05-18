@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data — never commit raw data
+data/raw/
+data/processed/
+*.npy
+*.nii
+*.nii.gz
+*.dcm
+
+# Model weights & checkpoints
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+*.bin
+lora_weights/
+
+# FAISS index
+*.faiss
+*.index
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+wandb/
+runs/
+
+# Docker
+docker-compose.override.yml

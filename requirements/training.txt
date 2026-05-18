@@ -1,0 +1,5 @@
+trl>=0.12.0
+datasets>=2.19.0
+wandb>=0.17.0
+scipy>=1.13.0
+scikit-learn>=1.4.0

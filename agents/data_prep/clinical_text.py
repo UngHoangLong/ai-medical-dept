@@ -1,26 +1,64 @@
-def clinical_to_text(clinical_data: dict, question: str) -> str:
+def clinical_to_text(clinical_data: dict) -> str:
+    """
+    Convert structured clinical JSON → plain English paragraph.
+    Covers: demographics, smoking history, disease history, cancer history, family history.
+    """
     demo    = clinical_data.get("demo", {})
     smoking = clinical_data.get("smoking", {})
     disease = clinical_data.get("disease_his", {})
+    cancer  = clinical_data.get("cancer_his", {})
     fam     = clinical_data.get("fam_lc", {})
 
     parts = []
-    if demo:
-        parts.append(
-            f"Patient: {demo.get('age', '')} y/o {demo.get('gender', '')}, "
-            f"Race: {demo.get('race', '')}, "
-            f"{demo.get('height', '')}in / {demo.get('weight', '')}lbs."
-        )
-    if smoking.get("cigsmok"):
-        parts.append(
-            f"Smoking: {smoking['cigsmok']}, "
-            f"{smoking.get('pkyr', '')} pack-years, "
-            f"started age {smoking.get('smokeage', '')}."
-        )
-    if disease:
-        items = ", ".join(f"{k} (age {int(v)})" for k, v in disease.items())
-        parts.append(f"Disease history: {items}.")
-    if fam:
-        parts.append(f"Family history: {', '.join(fam.keys())}.")
 
-    return " ".join(parts) + f"\nQuestion: {question}"
+    # Demographics
+    if demo:
+        age    = int(demo["age"]) if demo.get("age") else None
+        gender = demo.get("gender", "")
+        race   = demo.get("race", "")
+        height = demo.get("height")
+        weight = demo.get("weight")
+        tokens = []
+        if age:
+            tokens.append(f"{age}-year-old {gender}")
+        if race:
+            tokens.append(race)
+        if height and weight:
+            bmi = round(weight * 0.453592 / ((height * 0.0254) ** 2), 1)
+            tokens.append(f"height {int(height)}in, weight {int(weight)}lbs (BMI {bmi})")
+        if tokens:
+            parts.append("Patient: " + ", ".join(tokens) + ".")
+
+    # Smoking
+    status = smoking.get("cigsmok", "")
+    if status and status != "Never":
+        pkyr     = smoking.get("pkyr")
+        start    = smoking.get("smokeage")
+        quit_age = smoking.get("age_quit")
+        smk = f"Smoking: {status}"
+        if pkyr:
+            smk += f", {int(pkyr)} pack-years"
+        if start:
+            smk += f", started age {int(start)}"
+        if status == "Former" and quit_age and quit_age > 0:
+            smk += f", quit age {int(quit_age)}"
+        parts.append(smk + ".")
+
+    # Disease history
+    if disease:
+        items = ", ".join(
+            f"{name} (onset age {int(age)})" for name, age in disease.items()
+        )
+        parts.append(f"Medical history: {items}.")
+
+    # Cancer history
+    if cancer:
+        items = ", ".join(str(k) for k in cancer.keys())
+        parts.append(f"Cancer history: {items}.")
+
+    # Family lung cancer history
+    if fam:
+        relatives = ", ".join(str(k) for k in fam.keys())
+        parts.append(f"Family history of lung cancer: {relatives}.")
+
+    return " ".join(parts) if parts else "No clinical data available."

@@ -15,6 +15,11 @@ Usage:
         --train-steps 5
 """
 
+import datasets.features.features as _feat
+from datasets.features import Value as _V
+if "Json" not in _feat._FEATURE_TYPES: _feat._FEATURE_TYPES["Json"] = _V
+if "List" not in _feat._FEATURE_TYPES: _feat._FEATURE_TYPES["List"] = _feat._FEATURE_TYPES["Sequence"]
+
 import argparse
 import os
 import time

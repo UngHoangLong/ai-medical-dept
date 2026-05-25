@@ -15,12 +15,6 @@ Usage:
         --train-steps 5
 """
 
-import datasets.features.features as _feat
-from datasets.features import Value as _V
-def _json_compat(**kwargs): return _V(dtype=kwargs.get("dtype", "large_string"))
-if "Json" not in _feat._FEATURE_TYPES: _feat._FEATURE_TYPES["Json"] = _json_compat
-if "List" not in _feat._FEATURE_TYPES: _feat._FEATURE_TYPES["List"] = _feat._FEATURE_TYPES["Sequence"]
-
 import argparse
 import os
 import time
@@ -78,17 +72,16 @@ def test_finetune(model, processor, dataset, steps: int):
     print(f"[FINETUNE] Testing {steps} training steps...")
     print(f"{'='*50}")
 
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from unsloth import FastVisionModel
 
-    model = prepare_model_for_kbit_training(model)
-    model = get_peft_model(model, LoraConfig(
+    model = FastVisionModel.get_peft_model(
+        model,
         r=16,
         lora_alpha=32,
         lora_dropout=0.05,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
         bias="none",
-        task_type="CAUSAL_LM",
-    ))
+    )
     model.print_trainable_parameters()
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4)
@@ -187,10 +180,13 @@ def main():
 
     # --- Load model ---
     print(f"\n[SETUP] Loading model: {model_id}")
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from unsloth import FastVisionModel
 
-    processor = AutoProcessor.from_pretrained(model_id)
-    model     = AutoModelForImageTextToText.from_pretrained(model_id, device_map="auto")
+    model, processor = FastVisionModel.from_pretrained(
+        model_id,
+        load_in_4bit=True,
+        dtype=None,
+    )
     print(f"[SETUP] Model loaded. VRAM: {get_vram_gb():.2f} GB")
 
     # --- Load dataset từ HuggingFace Hub ---

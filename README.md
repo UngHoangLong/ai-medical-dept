@@ -1,7 +1,7 @@
 # Folder findings and impressions
 ## Nội dung
 - Chứa source code preprocess bộ CT RATE và code train models.
-
+- Phần others là của bộ CVD. Chưa xong phần tiền xử lý
 ## Cấu trúc dataset để sẵn sàng cho finetune
 ### Preprocess
 #### Ảnh

@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-medical-dept"
@@ -27,6 +27,8 @@ serving = [
     "uvicorn[standard]>=0.29.0",
     "pydantic>=2.0.0",
     "faiss-cpu>=1.8.0",
+    "pydicom>=2.4.0",
+    "boto3>=1.34.0",
 ]
 training = [
     "datasets>=2.19.0",

@@ -1,4 +1,4 @@
-.PHONY: install lint test train-radiology train-cardiology train-oncology serve docker-train docker-serve
+.PHONY: install lint test train-radiology train-cardiology train-oncology serve docker-train docker-backend
 
 install:
 	pip install -e ".[dev,serving,training,segmentation]"
@@ -31,13 +31,13 @@ train-synthesis:
 build-index:
 	python scripts/build_index.py --config configs/serving.yaml
 
-# Inference server
+# Backend dev server (orchestrates calls to Modal)
 serve:
-	uvicorn serving.server:app --host $${API_HOST:-0.0.0.0} --port $${API_PORT:-8000} --reload
+	uvicorn serving.backend.server:app --host $${API_HOST:-0.0.0.0} --port $${API_PORT:-8000} --reload
 
-# Docker (VastAI)
+# Docker
 docker-train:
 	docker build -f docker/Dockerfile.train -t ai-medical-dept:train .
 
-docker-serve:
-	docker build -f docker/Dockerfile.serve -t ai-medical-dept:serve .
+docker-backend:
+	docker build -f docker/Dockerfile.backend -t ai-medical-dept-backend .

@@ -187,7 +187,7 @@ class MedicalPipeline:
                 self.modal_pipeline_url,
                 [{"id": "verification", "adapter": "base",
                   "prompt": verif_prompt, "max_new_tokens": 1024,
-                  "repetition_penalty": 1.05}],
+                  "repetition_penalty": 1.3}],
                 cache_key,
                 image_urls,  # Call 2 may land on a different container — always pass S3 URLs
             )

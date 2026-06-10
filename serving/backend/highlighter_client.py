@@ -37,6 +37,7 @@ _DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
+    "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
 }
 MODEL = os.environ.get("HIGHLIGHTER_MODEL", _DEFAULT_MODELS.get(PROVIDER, ""))
 
@@ -62,6 +63,13 @@ def _get_client():
         elif PROVIDER == "openai":
             from openai import AsyncOpenAI
             _client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0)
+        elif PROVIDER == "openrouter":
+            from openai import AsyncOpenAI
+            _client = AsyncOpenAI(
+                api_key=os.environ["OPENROUTER_API_KEY"],
+                base_url="https://openrouter.ai/api/v1",
+                max_retries=0,
+            )
         else:
             raise ValueError(f"Unknown HIGHLIGHTER_PROVIDER: {PROVIDER!r}")
     return _client
@@ -110,6 +118,7 @@ _CALL_FNS = {
     "gemini": _call_gemini,
     "anthropic": _call_anthropic,
     "openai": _call_openai,
+    "openrouter": _call_openai,  # OpenRouter cũng tương thích OpenAI, chỉ khác base_url
 }
 
 

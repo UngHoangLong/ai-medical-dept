@@ -1,0 +1,23 @@
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Frontend (deployed separately on Vercel)
+frontend/
+
+# Data, notebooks, reports, training — not needed for backend image
+data/
+Notebooks/
+reports/
+training/
+scripts/
+tests/
+*.ipynb
+
+# Env files (passed via env_file at runtime, not baked into image)
+.env
+.env.*
+!.env.example

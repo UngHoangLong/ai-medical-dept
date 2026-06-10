@@ -1,10 +1,11 @@
-base_model_id: unsloth/medgemma-1.5-4b-it-unsloth-bnb-4bit
+base_model_id: unsloth/medgemma-1.5-4b-it
 
 # LoRA adapter paths (relative to CHECKPOINT_DIR)
 lora_adapters:
-  radiology:  lora_radiology/
-  cardiology: lora_cardiology/
-  oncology:   lora_oncology/
+  radiology:          lora_radiology/
+  cardiology:         lora_cardiology/
+  oncology:           lora_oncology/
+  finding_impression: lora_finding_impression/
 
 quantization:
   load_in_4bit: true

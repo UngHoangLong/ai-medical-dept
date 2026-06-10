@@ -12,6 +12,7 @@ venv/
 .env
 .env.*
 !.env.example
+!frontend/.env.production
 
 # Data — never commit raw data
 data/raw/

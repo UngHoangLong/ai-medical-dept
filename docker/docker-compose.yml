@@ -9,3 +9,5 @@ services:
     env_file:
       - ../.env
     restart: unless-stopped
+
+# docker compose -f docker/docker-compose.yml up -d --build

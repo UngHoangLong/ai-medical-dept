@@ -36,3 +36,9 @@ class AnalyzeResponse(BaseModel):
     oncology: OncologyResult
     finding_impression: FindingImpressionResult
     verification: VerificationResult
+
+
+class AnalysisListItem(BaseModel):
+    pid: str
+    series_uid: str
+    last_modified: str

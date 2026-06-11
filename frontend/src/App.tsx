@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { UserPlus, MessageSquare, MessageSquareOff } from 'lucide-react'
+import { UserPlus, MessageSquare, MessageSquareOff, History } from 'lucide-react'
 import type { AnalyzeResponse } from './types/api'
 import CTViewer from './components/CTViewer'
 import AgentResults from './components/AgentResults'
 import ChatPanel from './components/ChatPanel'
 import PatientModal from './components/PatientModal'
+import PatientHistoryModal from './components/PatientHistoryModal'
 import PatientTabs from './components/PatientTabs'
 import {
   type PatientEntry, patientId,
@@ -19,6 +20,8 @@ export default function App() {
   const [status, setStatus] = useState<AnalysisStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -97,6 +100,42 @@ export default function App() {
     setStatus('done')
   }
 
+  async function handleLoadFromHistory(pid: string, series_uid: string) {
+    const id = patientId(pid, series_uid)
+
+    // Đã có sẵn trong session — chỉ cần chuyển tab
+    if (patients.some(p => patientId(p.pid, p.series_uid) === id)) {
+      setHistoryOpen(false)
+      handleSelectPatient(id)
+      return
+    }
+
+    setHistoryLoadingId(id)
+    try {
+      const resp = await fetch(`${BACKEND}/api/v1/analysis/${pid}/${series_uid}`)
+      if (!resp.ok) {
+        const text = await resp.text()
+        throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`)
+      }
+      const data: AnalyzeResponse = await resp.json()
+
+      setPatients(prev => {
+        const next = [...prev.filter(p => patientId(p.pid, p.series_uid) !== id), { pid, series_uid, result: data }]
+        savePatients(next)
+        return next
+      })
+      setActiveId(id)
+      saveActiveId(id)
+      setErrorMsg(null)
+      setStatus('done')
+      setHistoryOpen(false)
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setHistoryLoadingId(null)
+    }
+  }
+
   function handleRemovePatient(id: string) {
     setPatients(prev => {
       const next = prev.filter(p => patientId(p.pid, p.series_uid) !== id)
@@ -155,6 +194,15 @@ export default function App() {
         />
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Patient history */}
+          <button
+            onClick={() => setHistoryOpen(true)}
+            title="Patient history"
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+          >
+            <History size={16} />
+          </button>
+
           {/* Chat toggle */}
           <button
             onClick={() => setChatOpen(o => !o)}
@@ -203,6 +251,14 @@ export default function App() {
         <PatientModal
           onAnalyze={handleAnalyze}
           onClose={() => setModalOpen(false)}
+        />
+      )}
+
+      {historyOpen && (
+        <PatientHistoryModal
+          onSelect={handleLoadFromHistory}
+          onClose={() => setHistoryOpen(false)}
+          loadingId={historyLoadingId}
         />
       )}
     </div>

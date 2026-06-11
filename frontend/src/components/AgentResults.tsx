@@ -136,6 +136,30 @@ function splitNumberedList(text: string): string[] | null {
   return items
 }
 
+// Verification thường chia theo chủ đề bằng các đoạn bắt đầu bằng
+// "**Label**: ..." (vd "**Chest Findings:**", "**Nodule Characteristics**:")
+// — gom các đoạn không có label vào group label gần nhất phía trước, để
+// hiển thị thành từng khối riêng theo chủ đề. Nếu không có label nào,
+// trả về 1 group duy nhất (label rỗng) để fallback render như cũ.
+const LABEL_PARA_RE = /^\*\*(.+?)\*\*:?\s*/
+
+function splitLabeledGroups(text: string): { label: string; paragraphs: string[] }[] {
+  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+  const groups: { label: string; paragraphs: string[] }[] = []
+
+  for (const para of paras) {
+    const m = para.match(LABEL_PARA_RE)
+    if (m) {
+      groups.push({ label: m[1].replace(/:\s*$/, ''), paragraphs: [para.slice(m[0].length)] })
+    } else if (groups.length > 0) {
+      groups[groups.length - 1].paragraphs.push(para)
+    } else {
+      groups.push({ label: '', paragraphs: [para] })
+    }
+  }
+  return groups
+}
+
 function Badge({ value, field }: { value: string | null; field: string }) {
   if (!value) return <span className="text-gray-600 text-xs">—</span>
 
@@ -403,6 +427,28 @@ export default function AgentResults({ result, status, errorMsg }: Props) {
                 </p>
               )}
               {(() => {
+                const groups = splitLabeledGroups(section.body)
+                if (groups.length > 1 || groups[0]?.label) {
+                  return (
+                    <div className="space-y-3">
+                      {groups.map((g, gi) => (
+                        <div key={gi}>
+                          {g.label && (
+                            <p className="text-xs font-semibold text-gray-400 mb-1">
+                              {g.label}
+                            </p>
+                          )}
+                          {g.paragraphs.map((p, pi) => (
+                            <p key={pi} className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap mb-1.5 last:mb-0">
+                              {renderAnnotated(p)}
+                            </p>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                }
+
                 const items = splitNumberedList(section.body)
                 if (!items) {
                   return (

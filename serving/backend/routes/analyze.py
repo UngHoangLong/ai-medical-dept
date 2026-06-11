@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
-from serving.backend.schemas import AnalyzeResponse
+from serving.backend.schemas import AnalysisListItem, AnalyzeResponse
 
 router = APIRouter()
 
@@ -40,3 +40,10 @@ async def get_analysis(request: Request, pid: str, series_uid: str):
     if result is None:
         raise HTTPException(status_code=404, detail="No analysis found for this patient/series")
     return result
+
+
+# Danh sách bệnh nhân đã có kết quả phân tích lưu trên S3.
+@router.get("/analyses", response_model=list[AnalysisListItem])
+async def list_analyses(request: Request):
+    pipeline = request.app.state.pipeline
+    return await pipeline.list_analyses()

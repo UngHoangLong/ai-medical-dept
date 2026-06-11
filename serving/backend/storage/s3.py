@@ -81,3 +81,25 @@ class S3Storage:
                 return None
             raise
         return json.loads(obj["Body"].read())
+
+    def list_analyses(self) -> list[dict]:
+        """Liệt kê tất cả bệnh nhân đã có kết quả phân tích lưu trên S3,
+        mới nhất trước. Mỗi item: {"pid", "series_uid", "last_modified"}."""
+        items = []
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix="analysis-results/"):
+            for obj in page.get("Contents", []):
+                rel = obj["Key"][len("analysis-results/"):]
+                if not rel.endswith(".json"):
+                    continue
+                pid, _, series_uid = rel[:-len(".json")].partition("/")
+                if not series_uid:
+                    continue
+                items.append({
+                    "pid": pid,
+                    "series_uid": series_uid,
+                    "last_modified": obj["LastModified"].isoformat(),
+                })
+
+        items.sort(key=lambda i: i["last_modified"], reverse=True)
+        return items

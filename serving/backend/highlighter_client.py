@@ -38,6 +38,7 @@ _DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
     "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek": "deepseek-chat",
 }
 MODEL = os.environ.get("HIGHLIGHTER_MODEL", _DEFAULT_MODELS.get(PROVIDER, ""))
 
@@ -68,6 +69,13 @@ def _get_client():
             _client = AsyncOpenAI(
                 api_key=os.environ["OPENROUTER_API_KEY"],
                 base_url="https://openrouter.ai/api/v1",
+                max_retries=0,
+            )
+        elif PROVIDER == "deepseek":
+            from openai import AsyncOpenAI
+            _client = AsyncOpenAI(
+                api_key=os.environ["DEEPSEEK_API_KEY"],
+                base_url="https://api.deepseek.com",
                 max_retries=0,
             )
         else:
@@ -119,6 +127,7 @@ _CALL_FNS = {
     "anthropic": _call_anthropic,
     "openai": _call_openai,
     "openrouter": _call_openai,  # OpenRouter cũng tương thích OpenAI, chỉ khác base_url
+    "deepseek": _call_openai,  # DeepSeek cũng tương thích OpenAI, chỉ khác base_url
 }
 
 

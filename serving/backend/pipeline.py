@@ -178,7 +178,7 @@ class MedicalPipeline:
             # Call 2 — Agent 5 Part 1: MedGemma base (no LoRA) xác minh lại qua ảnh CT
             # Images đã có trong RAM cache của Modal từ call 1 → không cần gửi image_urls lại
             verif_prompt = _verif_fmt.format_prompt(
-                radio_screen, radio_detail, cardio, onco, fi
+                radio_screen, radio_detail, cardio, onco, fi, clinical_data
             )
             logger.info("[Agent5/Part1] Building verification task — prompt_len=%d chars",
                         len(verif_prompt))

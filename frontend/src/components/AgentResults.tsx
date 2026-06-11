@@ -51,6 +51,29 @@ const HL_CLASS: Record<string, string> = {
 
 const HL_RE = /<hl c="(critical|warning|normal)">(.*?)<\/hl>/gs
 
+// ── Render markdown nhẹ (**bold**, *italic*) — model verify đôi khi tự chèn
+// markdown để nhấn mạnh section (vd "**Chest:**", "*Other*:") ──
+const MD_RE = /\*\*(.+?)\*\*|\*(.+?)\*/g
+
+function renderMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let cursor = 0
+  let i = 0
+
+  for (const m of text.matchAll(MD_RE)) {
+    const start = m.index ?? 0
+    if (start > cursor) nodes.push(text.slice(cursor, start))
+    if (m[1] !== undefined) {
+      nodes.push(<strong key={`${keyPrefix}-${i++}`}>{m[1]}</strong>)
+    } else {
+      nodes.push(<em key={`${keyPrefix}-${i++}`}>{m[2]}</em>)
+    }
+    cursor = start + m[0].length
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
 function renderAnnotated(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
   let cursor = 0
@@ -58,25 +81,27 @@ function renderAnnotated(text: string): React.ReactNode[] {
 
   for (const m of text.matchAll(HL_RE)) {
     const start = m.index ?? 0
-    if (start > cursor) nodes.push(text.slice(cursor, start))
+    if (start > cursor) nodes.push(...renderMarkdown(text.slice(cursor, start), `pre-${i}`))
     nodes.push(
-      <mark key={i++} className={`${HL_CLASS[m[1]]} rounded px-0.5`}>
-        {m[2]}
+      <mark key={`hl-${i}`} className={`${HL_CLASS[m[1]]} rounded px-0.5`}>
+        {renderMarkdown(m[2], `hl-${i}`)}
       </mark>
     )
+    i++
     cursor = start + m[0].length
   }
-  if (cursor < text.length) nodes.push(text.slice(cursor))
+  if (cursor < text.length) nodes.push(...renderMarkdown(text.slice(cursor), `post-${i}`))
   return nodes
 }
 
-// ── Verification (Agent 5) thường tự format thành "FINDINGS: ... IMPRESSION:
-// ..." trong 1 đoạn free-text — tách ra thành section riêng để hiển thị giống
-// Agent 4, không bắt buộc model phải tuân theo cấu trúc này ──
-// Chỉ tách khi FINDINGS:/IMPRESSION: chiếm trọn 1 dòng (làm tiêu đề riêng) —
+// ── Verification (Agent 5) thường tự chèn các tiêu đề section dạng
+// "FINDINGS:", "IMPRESSION:", "FINDINGS AND IMPRESSION:"... — tách ra thành
+// section riêng để hiển thị giống Agent 4, không bắt buộc model phải tuân
+// theo 1 cách viết cố định ──
+// Chỉ tách khi cả dòng là CHỮ HOA + dấu ":" đứng riêng (làm tiêu đề riêng) —
 // tránh nhầm với các cụm như "1. Chest findings:", "6. Unreported findings:"
 // nằm giữa câu, vốn là 1 phần của nội dung chứ không phải tiêu đề section.
-const VERIF_SECTION_RE = /^[ \t]*(FINDINGS|IMPRESSION):[ \t]*\n+/gim
+const VERIF_SECTION_RE = /^[ \t]*([A-Z][A-Z \/]{1,40}):[ \t]*\n+/gm
 
 function splitVerificationSections(text: string): { title: string; body: string }[] {
   const parts = text.split(VERIF_SECTION_RE)

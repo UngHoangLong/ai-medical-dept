@@ -45,6 +45,7 @@ class VerificationInferenceFormatter:
         cardiology          : {"answer": {"CVD_diagnosis": ..., "CVD_mortality": ...}}
         oncology            : {"answer": {"lung_cancer_risk": ...}}
         finding_impression  : {"findings": "...", "impression": "..."}
+        clinical_data       : structured clinical JSON (dict hoặc string) từ request gốc
     """
 
     def format_prompt(
@@ -54,7 +55,12 @@ class VerificationInferenceFormatter:
         cardiology: dict,
         oncology: dict,
         finding_impression: dict,
+        clinical_data: dict | str | None = None,
     ) -> str:
+        from agents.data_prep.clinical_text import clinical_to_text
+
+        clinical_text = clinical_to_text(clinical_data or {})
+
         screen_ans = radiology_screening.get("answer", {})
         detail_ans = (radiology_detail or {}).get("answer", {})
         cardio_ans = cardiology.get("answer", {})
@@ -82,7 +88,11 @@ class VerificationInferenceFormatter:
         )
 
         return (
-            "You are an experienced physician conducting an independent multidisciplinary review of a chest CT scan.\n\n"
+            "You are an experienced physician conducting an independent multidisciplinary review of a chest CT scan, "
+            "tasked with VERIFYING the conclusions reported below by other specialist AI agents — your job is to "
+            "actively cross-check and challenge each conclusion against the images, not just describe the images "
+            "independently.\n\n"
+            f"[PATIENT]\n{clinical_text}\n\n"
             "The following conclusions were reported by specialist AI agents for this scan:\n\n"
             f"[RADIOLOGY — Chest Findings]\n{screen_block}"
             f"{detail_section}\n\n"
@@ -92,9 +102,9 @@ class VerificationInferenceFormatter:
             f"Findings:\n{fi_findings}\n\n"
             f"Impression:\n{fi_impression}\n\n"
             "---\n"
-            "Carefully examine ALL provided CT scan images.\n\n"
-            "Provide your independent clinical assessment as a free-text narrative. "
-            "Address each of the following points:\n"
+            "Carefully examine ALL provided CT scan images. For EACH point below, state whether you AGREE "
+            "or DISAGREE with the reported conclusion (briefly quote it) and explain why based on what you "
+            "observe:\n"
             "1. Chest findings — do the CT images support the reported nodule presence, "
             "atelectasis, effusion, consolidation, emphysema, fibrosis, masses?\n"
             f"{nodule_instruction}\n"

@@ -34,7 +34,11 @@ SYSTEM_PROMPT = (
     "in the original text and must match exactly.\n"
     "2. Pick short, meaningful phrases (a few words), not whole sentences "
     "or paragraphs.\n"
-    "3. If nothing is significant, return an empty list.\n\n"
+    "3. Be thorough: scan the ENTIRE text and list EVERY clinically "
+    "significant finding, abnormality, or notable negative finding you can "
+    "identify - not just the single most prominent one. A typical report "
+    "usually has multiple such phrases.\n"
+    "4. If nothing is significant, return an empty list.\n\n"
     'Return ONLY a JSON object of the form: {"highlights": '
     '[{"phrase": "...", "category": "critical"|"warning"|"normal"}, ...]}'
     " - no other text."

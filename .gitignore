@@ -54,3 +54,5 @@ runs/
 
 # Docker
 docker-compose.override.yml
+
+rimine.pem

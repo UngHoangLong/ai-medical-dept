@@ -102,6 +102,10 @@ class MedicalPipeline:
         cache_key = f"{pid}/{series_uid}"
         return await asyncio.to_thread(self.storage.load_analysis, cache_key)
 
+    async def list_analyses(self) -> list[dict]:
+        """Liệt kê tất cả bệnh nhân đã có kết quả phân tích lưu trên S3."""
+        return await asyncio.to_thread(self.storage.list_analyses)
+
     async def run(
         self,
         pid: str,

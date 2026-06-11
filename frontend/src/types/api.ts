@@ -45,3 +45,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+export interface AnalysisListItem {
+  pid: string
+  series_uid: string
+  last_modified: string
+}

@@ -59,4 +59,5 @@ runs/
 # Docker
 docker-compose.override.yml
 
-rimine.pem
+
+.venv_mcp_server

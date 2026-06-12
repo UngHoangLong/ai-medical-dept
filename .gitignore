@@ -12,6 +12,7 @@ venv/
 .env
 .env.*
 !.env.example
+!frontend/.env.production
 
 # Data — never commit raw data
 data/raw/
@@ -36,6 +37,9 @@ lora_weights/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+
+# Test fixtures (large sample data)
+tests/fixtures/
 
 # IDE
 .vscode/

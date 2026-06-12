@@ -1,55 +1,48 @@
-import json
-from pathlib import Path
+import random
+from typing import Callable
 
 from torch.utils.data import Dataset
 
-from agents.data_prep.clinical_text import clinical_to_text
-from agents.data_prep.ct_processor import load_and_slice
+from agents.data_prep.prepare_data import DataPrepAgent
 
 
 class OpenM3ChestDataset(Dataset):
     """
-    Instruction-tuning dataset for one OpenM3Chest task file.
-    Each item: (list[PIL.Image], question_text, answer_text)
+    Streaming instruction-tuning dataset cho 1 task.
+
+    records: list of dicts từ HuggingFace load_dataset() hoặc local JSON
+    Mỗi record cần có: keys, pids, clinical_data, questions, labels
+
+    Mỗi __getitem__:
+      - Gọi DataPrepAgent để đảm bảo NPY tồn tại (download nếu chưa có)
+      - Random pick 1 trong 10 câu hỏi
+      - Build prompt = clinical text + question
+      - Trả về {slices, prompt, answer, pid}
     """
 
     def __init__(
         self,
-        json_path: str,
-        task_name: str,
-        question: str,
-        label_fn,           # callable(record) -> str
-        bbox_key: str = "lung_bboxes",
-        max_slices: int = 85,
-        image_size: int = 896,
+        records,                    # HuggingFace Dataset hoặc list[dict]
+        label_fn: Callable,         # callable(record) -> str
+        data_prep: DataPrepAgent,
     ):
-        self.records   = json.loads(Path(json_path).read_text())
-        self.task_name = task_name
-        self.question  = question
+        self.records   = records
         self.label_fn  = label_fn
-        self.bbox_key  = bbox_key
-        self.max_slices = max_slices
-        self.image_size = image_size
+        self.data_prep = data_prep
 
     def __len__(self) -> int:
         return len(self.records)
 
     def __getitem__(self, idx: int) -> dict:
-        record = self.records[idx]
+        record     = dict(self.records[idx])   # HF Dataset trả về dict-like, convert để an toàn
+        series_uid = record["keys"]
+        pid        = str(record.get("pids", "unknown"))
 
-        slices = load_and_slice(
-            npy_path=record["npy_path"],
-            bbox=record[self.bbox_key],
-            max_slices=self.max_slices,
-            image_size=self.image_size,
-        )
+        record["_answer"]   = self.label_fn(record)
+        record["_question"] = random.choice(record["questions"])
 
-        clinical_text = clinical_to_text(record.get("clinical_data", {}), self.question)
-        answer = self.label_fn(record)
+        results = self.data_prep.prepare_batch([record])
+        if not results:
+            raise RuntimeError(f"NPY not available for series {series_uid} (pid={pid})")
 
-        return {
-            "slices": slices,
-            "clinical_text": clinical_text,
-            "answer": answer,
-            "pid": record.get("pids", ""),
-        }
+        return results[0]

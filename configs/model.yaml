@@ -1,16 +1,21 @@
-base_model_id: google/medgemma-1.5-4b-it
+base_model_id: unsloth/medgemma-1.5-4b-it
 
 # LoRA adapter paths (relative to CHECKPOINT_DIR)
 lora_adapters:
-  radiology:  lora_radiology/
-  cardiology: lora_cardiology/
-  oncology:   lora_oncology/
+  radiology:          lora_radiology/
+  cardiology:         lora_cardiology/
+  oncology:           lora_oncology/
+  finding_impression: lora_finding_impression/
 
 quantization:
   load_in_4bit: true
   bnb_4bit_compute_dtype: bfloat16
   bnb_4bit_quant_type: nf4
   bnb_4bit_use_double_quant: true
+
+data_prep:
+  max_slices: 85       # max CT slices passed to MedGemma (context window constraint)
+  max_cache_gb: 100.0  # evict NPY cache when exceeding this limit on disk
 
 generation:
   max_new_tokens: 512

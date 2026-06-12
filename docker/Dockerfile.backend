@@ -1,0 +1,19 @@
+# FastAPI backend image for VPS deployment.
+# GPU inference runs on Modal — this image is CPU-only and lightweight
+# (no torch/transformers/peft).
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements/backend.txt requirements/backend.txt
+RUN pip install --no-cache-dir -r requirements/backend.txt
+
+COPY agents/ agents/
+COPY serving/ serving/
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "serving.backend.server:app", "--host", "0.0.0.0", "--port", "8000"]

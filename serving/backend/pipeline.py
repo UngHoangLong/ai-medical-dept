@@ -87,8 +87,14 @@ class MedicalPipeline:
 
     async def _ensure_images_on_s3(self, cache_key: str, dicom_zip_bytes: bytes) -> list[str]:
         """Convert .dcm → PNG → upload S3 (nếu chưa có), trả về danh sách presigned URL."""
-        if cache_key in self._uploaded:
-            n_slices = self._uploaded[cache_key]
+        n_slices = self._uploaded.get(cache_key)
+        if n_slices is None:
+            # _uploaded reset mỗi lần container restart — hỏi lại S3 (nguồn thật)
+            # trước khi quyết định decode lại từ đầu.
+            n_slices = await asyncio.to_thread(self.storage.count_slices, cache_key)
+
+        if n_slices:
+            self._uploaded[cache_key] = n_slices
             logger.info("[S3] HIT — %d slices đã có sẵn trên S3, bỏ qua convert + upload", n_slices)
         else:
             logger.info("[CT] Unzipping → DICOM → HU volume → slicing...")

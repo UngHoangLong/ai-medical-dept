@@ -54,6 +54,14 @@ class S3Storage:
             list(pool.map(_put, enumerate(images)))
         return len(images)
 
+    def count_slices(self, cache_key: str) -> int:
+        """Số PNG đã có sẵn trên S3 cho cache_key này (0 nếu chưa upload)."""
+        resp = self.client.list_objects_v2(
+            Bucket=self.bucket,
+            Prefix=f"ct-slices/{cache_key}/",
+        )
+        return resp.get("KeyCount", 0)
+
     def upload_dicom_zip(self, cache_key: str, zip_bytes: bytes) -> str:
         """Upload nguyên file .zip DICOM gốc lên S3. Trả về S3 key đã lưu."""
         key = _dicom_zip_key(cache_key)

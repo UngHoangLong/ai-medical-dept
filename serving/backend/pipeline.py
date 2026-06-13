@@ -49,6 +49,7 @@ from agents.verification.formatter import parse_inference_output as verif_parse
 
 from .highlighter_client import highlight_many
 from .modal_client import call_modal_pipeline
+from .storage.postgres import PgStorage
 from .storage.s3 import S3Storage
 
 MAX_SLICES = 85
@@ -75,7 +76,14 @@ class MedicalPipeline:
     def __init__(self):
         self.modal_pipeline_url = os.environ["MODAL_PIPELINE_URL"]
         self.storage = S3Storage()
+        self.pg = PgStorage()
         self._uploaded: dict[str, int] = {}  # cache_key → số slice đã có trên S3
+
+    async def connect(self) -> None:
+        await self.pg.connect()
+
+    async def close(self) -> None:
+        await self.pg.close()
 
     async def _ensure_images_on_s3(self, cache_key: str, dicom_zip_bytes: bytes) -> list[str]:
         """Convert .dcm → PNG → upload S3 (nếu chưa có), trả về danh sách presigned URL."""
@@ -99,12 +107,11 @@ class MedicalPipeline:
 
     async def get_analysis(self, pid: str, series_uid: str) -> dict | None:
         """Load lại kết quả phân tích đã lưu — dùng cho chatbot /ask."""
-        cache_key = f"{pid}/{series_uid}"
-        return await asyncio.to_thread(self.storage.load_analysis, cache_key)
+        return await self.pg.get_analysis(pid, series_uid)
 
     async def list_analyses(self) -> list[dict]:
-        """Liệt kê tất cả bệnh nhân đã có kết quả phân tích lưu trên S3."""
-        return await asyncio.to_thread(self.storage.list_analyses)
+        """Liệt kê tất cả bệnh nhân đã có kết quả phân tích lưu trong DB."""
+        return await self.pg.list_analyses()
 
     async def run(
         self,
@@ -118,15 +125,16 @@ class MedicalPipeline:
         logger.info("=== Pipeline start  pid=%s  series=%s  zip_size=%.1fMB ===",
                     pid, series_uid, len(dicom_zip_bytes) / 1e6)
 
-        # Đã phân tích trước đó (lưu trên S3) → trả về luôn, bỏ qua Modal pipeline
-        cached_result = await asyncio.to_thread(self.storage.load_analysis, cache_key)
+        # Đã phân tích trước đó (lưu trong DB) → trả về luôn, bỏ qua Modal pipeline
+        cached_result = await self.pg.get_analysis(pid, series_uid)
         if cached_result is not None:
-            logger.info("=== Pipeline SKIP — kết quả đã có sẵn trên S3 (cache_key=%s) ===", cache_key)
+            logger.info("=== Pipeline SKIP — kết quả đã có sẵn trong DB (cache_key=%s) ===", cache_key)
             return cached_result
 
         image_urls = await self._ensure_images_on_s3(cache_key, dicom_zip_bytes)
 
-        logger.info("[Prompt] Clinical: %s", clinical_to_text(clinical_data)[:120])
+        clinical_text = clinical_to_text(clinical_data)
+        logger.info("[Prompt] Clinical: %s", clinical_text[:120])
 
         # Build tất cả prompts trước (formatter ở backend, không ở Modal)
         tasks = [
@@ -227,8 +235,19 @@ class MedicalPipeline:
             },
         }
 
-        # Lưu kết quả lên S3 — chatbot /ask sau này load lại làm context
-        await asyncio.to_thread(self.storage.save_analysis, cache_key, result)
+        # Lưu DICOM gốc lên S3 (cho CT Viewer) + report/clinical_data vào RDB
+        dicom_s3_key = await asyncio.to_thread(self.storage.upload_dicom_zip, cache_key, dicom_zip_bytes)
+        gender = (clinical_data.get("demo") or {}).get("gender")
+        if gender in (None, "", "None"):
+            gender = None
+
+        await self.pg.save_analysis(
+            pid, series_uid, clinical_data, clinical_text, result,
+            dicom_s3_key=dicom_s3_key,
+            ct_slices_prefix=f"ct-slices/{cache_key}/",
+            n_slices=self._uploaded[cache_key],
+            gender=gender,
+        )
 
         logger.info("=== Pipeline done  total=%.1fs ===", time.perf_counter() - t_total)
 

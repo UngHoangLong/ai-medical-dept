@@ -40,11 +40,19 @@ class PgStorage:
         """Load report_content đã lưu cho 1 (pid, series_uid). None nếu chưa có."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT report_content FROM {SCHEMA}.consultation_reports "
+                f"SELECT report_id, report_content FROM {SCHEMA}.consultation_reports "
                 "WHERE patient_id = $1 AND series_uid = $2",
                 pid, series_uid,
             )
-        return json.loads(row["report_content"]) if row else None
+        if not row:
+            return None
+
+        report = json.loads(row["report_content"]) or {}
+        report_id = str(row.get("report_id"))  # Lấy report_id từ DB để trả về cùng report_content (phục vụ thread_id cho FE)
+        return {
+            **report,
+            "report_id": report_id
+        }
 
     async def list_analyses(self) -> list[dict]:
         """Liệt kê tất cả bệnh nhân đã có report, mới nhất trước."""

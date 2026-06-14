@@ -93,7 +93,7 @@ inference_image = (
 
 # ─── Inference class ──────────────────────────────────────────────────────
 @app.cls(
-    gpu="A100-80GB",
+    gpu="A100-40GB",
     image=inference_image,
     volumes={
         MODEL_DIR: model_volume,

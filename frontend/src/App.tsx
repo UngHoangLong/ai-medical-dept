@@ -39,7 +39,17 @@ export default function App() {
       setPatients(restored)
       const active = loadActiveId()
       const fallback = patientId(restored[0].pid, restored[0].series_uid)
-      setActiveId(active && restored.some(p => patientId(p.pid, p.series_uid) === active) ? active : fallback)
+      const nextActiveId = active && restored.some(p => patientId(p.pid, p.series_uid) === active) ? active : fallback
+      setActiveId(nextActiveId)
+
+      const savedReportId = loadActiveReportId()
+      const restoredReportId = restored.find(p => patientId(p.pid, p.series_uid) === nextActiveId)?.result?.report_id ?? null
+      const finalReportId = savedReportId ?? restoredReportId
+      if (finalReportId) {
+        setReportId(finalReportId)
+        saveActiveReportId(finalReportId)
+      }
+
       setStatus('done')
     }
   }, [])

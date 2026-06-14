@@ -26,6 +26,9 @@ data/processed/
 *.nii.gz
 *.dcm
 
+data/
+Notebooks/
+
 # Model weights & checkpoints
 checkpoints/
 *.pt

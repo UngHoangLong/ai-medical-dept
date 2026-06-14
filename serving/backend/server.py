@@ -95,6 +95,7 @@ async def startup() -> None:
     global predictor
 
     app.state.pipeline = MedicalPipeline()
+<<<<<<< HEAD
     logger.info("MedicalPipeline loaded.")
 
     if os.getenv("DISABLE_VOXTELL", "0") == "1":
@@ -111,6 +112,14 @@ async def startup() -> None:
     except Exception as exc:
         predictor = None
         logger.exception("Error loading VoxTell model: %s", exc)
+=======
+    await app.state.pipeline.connect()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.pipeline.close()
+>>>>>>> origin/dev
 
 
 @app.get("/health")

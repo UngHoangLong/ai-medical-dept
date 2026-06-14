@@ -29,6 +29,7 @@ interface Props {
 }
 
 type Segmentation = {
+  id: string;
   file: File;
   prompt: string;
   isVisible: boolean;
@@ -36,6 +37,15 @@ type Segmentation = {
 };
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "";
+
+const SEGMENTATION_COLORS = [
+  "red",
+  "green",
+  "blue",
+  "yellow",
+  "purple",
+  "cyan",
+];
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -79,7 +89,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [viewerKey, setViewerKey] = useState("empty");
   const [sliceType, setSliceType] = useState<SLICE_TYPE>(SLICE_TYPE.MULTIPLANAR);
-  const [segmentation, setSegmentation] = useState<Segmentation | null>(null);
+  const [segmentations, setSegmentations] = useState<Segmentation[]>([]);
 
   const [prompt, setPrompt] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -142,7 +152,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
   useEffect(() => {
     setPrompt("");
-    setSegmentation(null);
+    setSegmentations([]);
     setShowDownloadMenu(false);
     setError(null);
     setSliceType(SLICE_TYPE.MULTIPLANAR);
@@ -163,7 +173,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
       try {
         const response = await fetch(
-          buildPatientUrl("/api/v1/voxtell/volume", pid, seriesUid),
+          buildPatientUrl("/api/v1/voxtell/volume", pid!, seriesUid!),
           { signal: controller.signal },
         );
 
@@ -201,7 +211,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
   }, [pid, seriesUid]);
 
   const resetViewer = () => {
-    setSegmentation(null);
+    setSegmentations([]);
     setPrompt("");
     setIsFullscreen(false);
     setShowDownloadMenu(false);
@@ -215,10 +225,12 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
     setError(null);
 
     try {
+      const promptText = prompt.trim();
+
       const formData = new FormData();
       formData.append("pid", pid);
       formData.append("series_uid", seriesUid);
-      formData.append("prompt", prompt.trim());
+      formData.append("prompt", promptText);
 
       const response = await fetch(`${BACKEND}/api/v1/voxtell/predict`, {
         method: "POST",
@@ -234,16 +246,23 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
       const blob = await response.blob();
       const file = new File(
         [blob],
-        `voxtell_${pid}_${seriesUid}_${prompt.trim().replace(/\s+/g, "_")}.nii.gz`,
+        `voxtell_${pid}_${seriesUid}_${promptText.replace(/\s+/g, "_")}.nii.gz`,
         { type: "application/gzip" },
       );
 
-      setSegmentation({
-        file,
-        prompt: prompt.trim(),
-        isVisible: true,
-        color: "red",
-      });
+      const id = `${Date.now()}-${promptText.replace(/\s+/g, "_")}`;
+      const color = SEGMENTATION_COLORS[segmentations.length % SEGMENTATION_COLORS.length];
+
+      setSegmentations((prev) => [
+        ...prev,
+        {
+          id,
+          file,
+          prompt: promptText,
+          isVisible: true,
+          color,
+        },
+      ]);
       setPrompt("");
     } catch (err) {
       console.error("Error running segmentation:", err);
@@ -268,13 +287,24 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
     URL.revokeObjectURL(url);
   };
 
-  const handleDownload = () => {
-    if (!segmentation) return;
+  const handleDownload = (segmentation: Segmentation) => {
     downloadFile(
       segmentation.file,
       `voxtell_${pid ?? "patient"}_${segmentation.prompt.replace(/\s+/g, "_")}.nii.gz`,
     );
     setShowDownloadMenu(false);
+  };
+
+  const toggleSegmentation = (id: string) => {
+    setSegmentations((prev) =>
+      prev.map((seg) =>
+        seg.id === id ? { ...seg, isVisible: !seg.isVisible } : seg,
+      ),
+    );
+  };
+
+  const removeSegmentation = (id: string) => {
+    setSegmentations((prev) => prev.filter((seg) => seg.id !== id));
   };
 
   return (
@@ -437,7 +467,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
                 <button
                   type="button"
                   onClick={resetViewer}
-                  disabled={!imageFile && !segmentation && !prompt}
+                  disabled={!imageFile && segmentations.length === 0 && !prompt}
                   className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-400 transition hover:border-slate-500 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RotateCcw className="h-3 w-3" />
@@ -451,7 +481,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
                 <Viewer
                   key={viewerKey}
                   image={imageFile}
-                  segmentation={segmentation}
+                  segmentations={segmentations}
                   sliceType={sliceType}
                   onSliceTypeChange={setSliceType}
                 />
@@ -480,59 +510,72 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
         <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
           <div className="flex items-center justify-between gap-2">
-            <SectionTitle>Current Segmentation</SectionTitle>
+            <SectionTitle>Segmentations</SectionTitle>
             <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-              {segmentation ? "1" : "0"}
+              {segmentations.length}
             </span>
           </div>
 
-          {!segmentation ? (
+          {segmentations.length === 0 ? (
             <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
-              Chưa có mask segmentation. Mỗi prompt mới sẽ thay thế mask hiện tại.
+              Chưa có mask segmentation. Mỗi prompt mới sẽ được thêm vào danh sách mask hiện tại.
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
-                  <p
-                    className="truncate text-sm font-medium text-slate-300"
-                    title={segmentation.prompt}
-                  >
-                    {segmentation.prompt}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSegmentation((prev) =>
-                      prev ? { ...prev, isVisible: !prev.isVisible } : prev,
-                    )
-                  }
-                  title={segmentation.isVisible ? "Hide" : "Show"}
-                  className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+            <div className="space-y-2">
+              {segmentations.map((segmentation) => (
+                <div
+                  key={segmentation.id}
+                  className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
                 >
-                  {segmentation.isVisible ? (
-                    <Eye className="h-4 w-4" />
-                  ) : (
-                    <EyeOff className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: segmentation.color }}
+                      />
+                      <p
+                        className="truncate text-sm font-medium text-slate-300"
+                        title={segmentation.prompt}
+                      >
+                        {segmentation.prompt}
+                      </p>
+                    </div>
 
-          {segmentation && (
-            <div className="relative" ref={downloadMenuRef}>
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-slate-600 hover:bg-slate-800"
-              >
-                <Download className="h-4 w-4" />
-                Download Segmentation (.nii.gz)
-              </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleSegmentation(segmentation.id)}
+                        title={segmentation.isVisible ? "Hide" : "Show"}
+                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                      >
+                        {segmentation.isVisible ? (
+                          <Eye className="h-4 w-4" />
+                        ) : (
+                          <EyeOff className="h-4 w-4" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(segmentation)}
+                        title="Download"
+                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => removeSegmentation(segmentation.id)}
+                        title="Remove"
+                        className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -543,11 +586,12 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
 interface ViewerProps {
   image?: File | string | null;
-  segmentation?: {
+  segmentations?: Array<{
+    id: string;
     file: File | string;
     color: string;
     isVisible: boolean;
-  } | null;
+  }>;
   sliceType?: SLICE_TYPE;
   onSliceTypeChange?: (st: SLICE_TYPE) => void;
 }
@@ -567,14 +611,14 @@ const SLICE_AXIS: Record<number, number> = {
 
 function Viewer({
   image,
-  segmentation,
-  sliceType = SLICE_TYPE.AXIAL,
+  segmentations = [],
+  sliceType = SLICE_TYPE.MULTIPLANAR,
   onSliceTypeChange,
 }: ViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nv, setNv] = useState<Niivue | null>(null);
-  const loadedSegRef = useRef(false);
+  const loadedSegsRef = useRef<Map<string, { volumeIndex: number }>>(new Map());
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
   const [sliceFrac, setSliceFrac] = useState(0.5);
   const [totalSlices, setTotalSlices] = useState(0);
@@ -692,7 +736,7 @@ function Viewer({
     const loadVolume = async () => {
       try {
         nv.volumes = [];
-        loadedSegRef.current = false;
+        loadedSegsRef.current.clear();
 
         if (typeof image === "string") {
           await nv.loadVolumes([{ url: image }]);
@@ -725,51 +769,71 @@ function Viewer({
   useEffect(() => {
     if (!nv || !image) return;
 
-    const syncSegmentation = async () => {
-      while (nv.volumes.length > 1) {
-        nv.removeVolume(nv.volumes[nv.volumes.length - 1]);
-      }
-      loadedSegRef.current = false;
-
-      if (!segmentation) {
-        nv.updateGLVolume();
-        return;
-      }
-
-      try {
-        const opacity = segmentation.isVisible ? 0.5 : 0;
-        let vol;
-
-        if (typeof segmentation.file === "string") {
-          vol = await NVImage.loadFromUrl({
-            url: segmentation.file,
-            colormap: segmentation.color,
-            opacity,
-            name: "voxtell_segmentation",
-          });
-        } else if (segmentation.file instanceof File) {
-          vol = await NVImage.loadFromFile({
-            file: segmentation.file,
-            name: "voxtell_segmentation",
-            colormap: segmentation.color,
-            opacity,
-          });
+    const findVolumeBySegId = (segId: string) => {
+      for (let i = 1; i < nv.volumes.length; i += 1) {
+        if (nv.volumes[i].name === segId) {
+          return nv.volumes[i];
         }
+      }
+      return null;
+    };
 
+    const syncSegmentations = async () => {
+      const currentIds = new Set(segmentations.map((seg) => seg.id));
+      const loadedIds = new Set(loadedSegsRef.current.keys());
+
+      for (const id of [...loadedIds].filter((loadedId) => !currentIds.has(loadedId))) {
+        const vol = findVolumeBySegId(id);
         if (vol) {
-          vol.name = "voxtell_segmentation";
-          nv.addVolume(vol);
-          loadedSegRef.current = true;
+          nv.removeVolume(vol);
         }
-      } catch (e) {
-        console.error("Failed to load segmentation:", e);
+        loadedSegsRef.current.delete(id);
+      }
+
+      for (const seg of segmentations) {
+        if (loadedSegsRef.current.has(seg.id)) {
+          const vol = findVolumeBySegId(seg.id);
+          if (vol) {
+            vol.opacity = seg.isVisible ? 0.5 : 0;
+          }
+          continue;
+        }
+
+        try {
+          const opacity = seg.isVisible ? 0.5 : 0;
+          let vol;
+
+          if (typeof seg.file === "string") {
+            vol = await NVImage.loadFromUrl({
+              url: seg.file,
+              colormap: seg.color,
+              opacity,
+              name: seg.id,
+            });
+          } else if (seg.file instanceof File) {
+            vol = await NVImage.loadFromFile({
+              file: seg.file,
+              name: seg.id,
+              colormap: seg.color,
+              opacity,
+            });
+          }
+
+          if (vol) {
+            vol.name = seg.id;
+            nv.addVolume(vol);
+            loadedSegsRef.current.set(seg.id, { volumeIndex: -1 });
+          }
+        } catch (e) {
+          console.error("Failed to load segmentation:", seg.id, e);
+        }
       }
 
       nv.updateGLVolume();
     };
 
-    syncSegmentation();
-  }, [nv, segmentation, image]);
+    syncSegmentations();
+  }, [nv, segmentations, image]);
 
   const handleSliceChange = useCallback(
     (fraction: number) => {

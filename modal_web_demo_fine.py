@@ -2,7 +2,11 @@ import modal
 import subprocess
 import time
 
-app = modal.App("voxtell-full-web-demo")
+app = modal.App("ai-medical-dept")
+
+# Modal Secret phải chứa:
+# S3_BUCKET_NAME, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+AWS_S3_SECRET_NAME = "aws-s3"
 
 image = (
     modal.Image.from_registry(
@@ -54,6 +58,7 @@ image = (
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install rt-utils'",
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install voxtell'",
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install python-multipart'",
+        "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install boto3 python-dotenv'",
 
         # Cài local repo
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && cd /app && python -m pip install -e .'",
@@ -61,20 +66,33 @@ image = (
         # Download model
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && cd /app && python download_model.py'",
 
-        # Patch frontend: gọi backend qua /api thay vì localhost:1711
+        # Patch frontend fallback URL: gọi backend qua /api thay vì localhost:1711
+        # Code mới đã dùng VITE_* env; block này chỉ là fallback nếu còn URL hard-code trong repo.
         r"""cd /app && python - <<'PY'
 from pathlib import Path
 import re
 
-p = Path("/app/frontend/src/App.tsx")
-s = p.read_text(encoding="utf-8")
+for p in Path("/app/frontend/src").rglob("*"):
+    if p.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+        continue
+    s = p.read_text(encoding="utf-8")
+    original = s
+    s = s.replace("http://localhost:1711", "/api")
+    s = s.replace("http://127.0.0.1:1711", "/api")
+    s = re.sub(r"https://[^'\"`]+modal\.run", "/api", s)
+    if s != original:
+        p.write_text(s, encoding="utf-8")
+        print(f"Patched frontend API URL fallback in {p}")
+PY""",
 
-s = s.replace("http://localhost:1711", "/api")
-s = s.replace("http://127.0.0.1:1711", "/api")
-s = re.sub(r"https://[^'\"`]+modal\.run", "/api", s)
-
-p.write_text(s, encoding="utf-8")
-print("Patched frontend API URLs to /api")
+        # Frontend env: qua Nginx /api proxy về backend 1711 trong cùng container.
+        # Modal Image.run_commands không hỗ trợ command bắt đầu trực tiếp bằng `cat`,
+        # nên dùng Python để ghi file.
+        r"""cd /app && python - <<'PY'
+from pathlib import Path
+p = Path('/app/frontend/.env.local')
+p.write_text('VITE_BACKEND_URL=/api\nVITE_VOXTELL_API_BASE_URL=/api\n', encoding='utf-8')
+print(p.read_text(encoding='utf-8'))
 PY""",
 
         # Patch Vite: cho phép Modal domain
@@ -149,9 +167,10 @@ def wait_for_port(port, timeout=180):
     timeout=60 * 60,
     max_containers=1,
     scaledown_window=20 * 60,
+    secrets=[modal.Secret.from_name(AWS_S3_SECRET_NAME)],
 )
 @modal.concurrent(max_inputs=20)
-@modal.web_server(8000, startup_timeout=300)
+@modal.web_server(8000, startup_timeout=600)
 def web():
     nginx_conf = r"""
 events {}
@@ -217,6 +236,9 @@ http {
         shell=True,
         executable="/bin/bash",
     )
+
+    print("Waiting for backend 1711...")
+    wait_for_port(1711, timeout=300)
 
     print("Waiting for frontend 2811...")
     wait_for_port(2811, timeout=180)

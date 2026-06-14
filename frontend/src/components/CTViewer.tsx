@@ -3,11 +3,11 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type ReactNode,
 } from "react";
 import {
   Brain,
+  ChevronDown,
   ChevronUp,
   Download,
   Eye,
@@ -18,38 +18,25 @@ import {
   Minimize2,
   Play,
   RotateCcw,
-  Trash2,
-  Upload,
-  ChevronDown,
 } from "lucide-react";
 import type { AnalysisStatus } from "../App";
 import { Niivue, NVImage, SLICE_TYPE } from "@niivue/niivue";
 
 interface Props {
   status?: AnalysisStatus;
+  pid?: string | null;
+  seriesUid?: string | null;
 }
 
 type Segmentation = {
-  id: string;
   file: File;
   prompt: string;
   isVisible: boolean;
   color: string;
-  displayColor: string;
 };
 
 const VOXTELL_API_BASE =
   import.meta.env.VITE_VOXTELL_API_BASE_URL || "http://localhost:1711";
-
-const SEGMENTATION_COLORS = [
-  { nv: "red", css: "#ef4444" },
-  { nv: "green", css: "#22c55e" },
-  { nv: "blue", css: "#3b82f6" },
-  { nv: "warm", css: "#f59e0b" },
-  { nv: "cool", css: "#06b6d4" },
-  { nv: "violet", css: "#8b5cf6" },
-  { nv: "winter", css: "#0ea5e9" },
-];
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -59,7 +46,6 @@ function getSliceTypeLabel(sliceType: SLICE_TYPE) {
   if (sliceType === SLICE_TYPE.AXIAL) return "Axial";
   if (sliceType === SLICE_TYPE.CORONAL) return "Coronal";
   if (sliceType === SLICE_TYPE.SAGITTAL) return "Sagittal";
-  if (sliceType === SLICE_TYPE.MULTIPLANAR) return "Multi";
   return "Viewer";
 }
 
@@ -71,29 +57,38 @@ function SectionTitle({ children }: { children: ReactNode }) {
   );
 }
 
-export default function CTViewer({ status }: Props) {
+function buildPatientUrl(path: string, pid: string, seriesUid: string) {
+  return `${VOXTELL_API_BASE}${path}/${encodeURIComponent(pid)}/${encodeURIComponent(seriesUid)}`;
+}
+
+async function readError(response: Response, fallback: string) {
+  const text = await response.text().catch(() => "");
+  if (!text) return fallback;
+
+  try {
+    const payload = JSON.parse(text);
+    return payload.detail || payload.message || text;
+  } catch {
+    return text;
+  }
+}
+
+export default function CTViewer({ status, pid, seriesUid }: Props) {
   const downloadMenuRef = useRef<HTMLDivElement>(null);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [viewerKey, setViewerKey] = useState("empty");
-  const [sliceType, setSliceType] = useState<SLICE_TYPE>(
-    SLICE_TYPE.MULTIPLANAR,
-  );
-  const [segmentations, setSegmentations] = useState<Segmentation[]>([]);
+  const [sliceType, setSliceType] = useState<SLICE_TYPE>(SLICE_TYPE.AXIAL);
+  const [segmentation, setSegmentation] = useState<Segmentation | null>(null);
 
   const [prompt, setPrompt] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-
-  const [inputFormat, setInputFormat] = useState<"nifti" | "dicom">("nifti");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-
-  const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [isLoadingVolume, setIsLoadingVolume] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const hasActivePatient = Boolean(pid && seriesUid);
   const activeViewLabel = getSliceTypeLabel(sliceType);
 
   useEffect(() => {
@@ -115,8 +110,6 @@ export default function CTViewer({ status }: Props) {
   useEffect(() => {
     if (!imageFile) return;
 
-    // NiiVue needs a resize event after the container changes size.
-    // Fire twice because fullscreen CSS transition/layout can settle slightly later.
     const first = window.setTimeout(() => {
       window.dispatchEvent(new Event("resize"));
     }, 80);
@@ -147,110 +140,68 @@ export default function CTViewer({ status }: Props) {
     };
   }, [isFullscreen]);
 
-  const cleanupDicomSession = () => {
-    if (!sessionId) return;
-    fetch(`${VOXTELL_API_BASE}/session/${sessionId}`, {
-      method: "DELETE",
-    }).catch(() => undefined);
-    setSessionId(null);
-  };
-
-  const resetStudyState = () => {
+  useEffect(() => {
     setPrompt("");
-    setSegmentations([]);
+    setSegmentation(null);
     setShowDownloadMenu(false);
     setError(null);
-  };
-
-  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) return;
-
-    const lowerName = file.name.toLowerCase();
-    resetStudyState();
-    cleanupDicomSession();
+    setSliceType(SLICE_TYPE.AXIAL);
     setIsFullscreen(false);
 
-    if (lowerName.endsWith(".zip")) {
-      setInputFormat("dicom");
-      setIsConverting(true);
+    if (!pid || !seriesUid) {
       setImageFile(null);
       setViewerKey("empty");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadPatientVolume() {
+      setIsLoadingVolume(true);
+      setImageFile(null);
+      setViewerKey("loading");
 
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const response = await fetch(`${VOXTELL_API_BASE}/convert`, {
-          method: "POST",
-          body: formData,
-        });
+        const response = await fetch(
+          buildPatientUrl("/voxtell/volume", pid, seriesUid),
+          { signal: controller.signal },
+        );
 
         if (!response.ok) {
-          const payload = await response
-            .json()
-            .catch(() => ({ detail: "Conversion failed" }));
-          throw new Error(payload.detail || "Conversion failed");
+          throw new Error(
+            await readError(response, "Không tải được CT volume từ backend."),
+          );
         }
 
-        const newSessionId = response.headers.get("X-Session-Id");
-        setSessionId(newSessionId);
-
         const blob = await response.blob();
-        const niftiFile = new File([blob], "converted.nii.gz", {
+        const file = new File([blob], `${pid}_${seriesUid}.nii.gz`, {
           type: "application/gzip",
         });
 
-        setIsLoadingFile(true);
-        setSliceType(SLICE_TYPE.MULTIPLANAR);
-        setViewerKey(`${niftiFile.name}-${niftiFile.size}-${Date.now()}`);
-        setImageFile(niftiFile);
-        window.setTimeout(() => setIsLoadingFile(false), 500);
+        setImageFile(file);
+        setViewerKey(`${pid}-${seriesUid}-${blob.size}-${Date.now()}`);
       } catch (err) {
-        console.error("Error converting DICOM:", err);
-        setInputFormat("nifti");
+        if (controller.signal.aborted) return;
+        console.error("Error loading VoxTell volume:", err);
+        setImageFile(null);
+        setViewerKey("empty");
         setError(
-          `Không convert được DICOM. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
+          err instanceof Error
+            ? err.message
+            : `Không tải được CT volume. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
         );
       } finally {
-        setIsConverting(false);
+        if (!controller.signal.aborted) setIsLoadingVolume(false);
       }
-
-      return;
     }
 
-    const isNifti =
-      lowerName.endsWith(".nii") ||
-      lowerName.endsWith(".nii.gz") ||
-      lowerName.endsWith(".gz");
+    loadPatientVolume();
 
-    if (!isNifti) {
-      setImageFile(null);
-      setViewerKey("empty");
-      setError(
-        "File chưa đúng định dạng. Hãy upload .nii, .nii.gz hoặc .zip DICOM.",
-      );
-      return;
-    }
-
-    setInputFormat("nifti");
-    setIsLoadingFile(true);
-    setSliceType(SLICE_TYPE.MULTIPLANAR);
-    setViewerKey(`${file.name}-${file.size}-${file.lastModified}`);
-    setImageFile(file);
-
-    window.setTimeout(() => {
-      setIsLoadingFile(false);
-    }, 500);
-  };
+    return () => controller.abort();
+  }, [pid, seriesUid]);
 
   const resetViewer = () => {
-    cleanupDicomSession();
-    setImageFile(null);
-    setViewerKey("empty");
-    setSegmentations([]);
+    setSegmentation(null);
     setPrompt("");
     setIsFullscreen(false);
     setShowDownloadMenu(false);
@@ -258,71 +209,52 @@ export default function CTViewer({ status }: Props) {
   };
 
   const handleSegmentation = async () => {
-    if (!imageFile || !prompt.trim()) return;
+    if (!pid || !seriesUid || !imageFile || !prompt.trim()) return;
 
     setIsProcessing(true);
     setError(null);
 
     try {
       const formData = new FormData();
-      formData.append("image", imageFile);
+      formData.append("pid", pid);
+      formData.append("series_uid", seriesUid);
       formData.append("prompt", prompt.trim());
 
-      const response = await fetch(`${VOXTELL_API_BASE}/predict`, {
+      const response = await fetch(`${VOXTELL_API_BASE}/voxtell/predict`, {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        const payload = await response
-          .json()
-          .catch(() => ({ detail: "Segmentation failed" }));
-        throw new Error(payload.detail || "Segmentation failed");
+        throw new Error(
+          await readError(response, "Không chạy được segmentation."),
+        );
       }
 
       const blob = await response.blob();
-      const file = new File([blob], `segmentation_${imageFile.name}`, {
-        type: "application/gzip",
-      });
-      const color =
-        SEGMENTATION_COLORS[segmentations.length % SEGMENTATION_COLORS.length];
+      const file = new File(
+        [blob],
+        `voxtell_${pid}_${seriesUid}_${prompt.trim().replace(/\s+/g, "_")}.nii.gz`,
+        { type: "application/gzip" },
+      );
 
-      setSegmentations((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          file,
-          prompt: prompt.trim(),
-          isVisible: true,
-          color: color.nv,
-          displayColor: color.css,
-        },
-      ]);
+      setSegmentation({
+        file,
+        prompt: prompt.trim(),
+        isVisible: true,
+        color: "red",
+      });
       setPrompt("");
     } catch (err) {
       console.error("Error running segmentation:", err);
       setError(
-        `Không chạy được segmentation. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
+        err instanceof Error
+          ? err.message
+          : `Không chạy được segmentation. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
       );
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const toggleVisibility = (id: string) => {
-    setSegmentations((prev) =>
-      prev.map((segmentation) =>
-        segmentation.id === id
-          ? { ...segmentation, isVisible: !segmentation.isVisible }
-          : segmentation,
-      ),
-    );
-  };
-
-  const deleteSegmentation = (id: string) => {
-    setSegmentations((prev) =>
-      prev.filter((segmentation) => segmentation.id !== id),
-    );
   };
 
   const downloadFile = (file: File, filename: string) => {
@@ -337,71 +269,12 @@ export default function CTViewer({ status }: Props) {
   };
 
   const handleDownload = () => {
-    if (segmentations.length === 0) return;
-
-    if (segmentations.length === 1) {
-      const segmentation = segmentations[0];
-      downloadFile(
-        segmentation.file,
-        `voxtell_${segmentation.prompt.replace(/\s+/g, "_")}.nii.gz`,
-      );
-      return;
-    }
-
-    segmentations.forEach((segmentation, index) => {
-      window.setTimeout(() => {
-        downloadFile(
-          segmentation.file,
-          `voxtell_${index + 1}_${segmentation.prompt.replace(/\s+/g, "_")}.nii.gz`,
-        );
-      }, index * 100);
-    });
-  };
-
-  const handleExportRtstruct = async () => {
-    if (!sessionId || segmentations.length === 0) return;
-
-    setIsExporting(true);
+    if (!segmentation) return;
+    downloadFile(
+      segmentation.file,
+      `voxtell_${pid ?? "patient"}_${segmentation.prompt.replace(/\s+/g, "_")}.nii.gz`,
+    );
     setShowDownloadMenu(false);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("session_id", sessionId);
-      formData.append(
-        "structure_names",
-        JSON.stringify(
-          segmentations.map((segmentation) => segmentation.prompt),
-        ),
-      );
-
-      for (const segmentation of segmentations) {
-        formData.append("segmentation_files", segmentation.file);
-      }
-
-      const response = await fetch(`${VOXTELL_API_BASE}/export-rtstruct`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const payload = await response
-          .json()
-          .catch(() => ({ detail: "Export failed" }));
-        throw new Error(payload.detail || "RTSTRUCT export failed");
-      }
-
-      const blob = await response.blob();
-      const file = new File([blob], "rtstruct.dcm", {
-        type: "application/dicom",
-      });
-      downloadFile(file, "rtstruct.dcm");
-    } catch (err) {
-      console.error("Error exporting RTSTRUCT:", err);
-      setError("Không export được RTSTRUCT. Kiểm tra backend VoxTell.");
-    } finally {
-      setIsExporting(false);
-    }
   };
 
   return (
@@ -423,7 +296,7 @@ export default function CTViewer({ status }: Props) {
                   VoxTell CT Viewer
                 </h1>
                 <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
-                  NIfTI volume viewer · segmentation mode
+                  Auto DICOM from S3 · NiiVue volume viewer
                 </p>
               </div>
             </div>
@@ -435,61 +308,45 @@ export default function CTViewer({ status }: Props) {
             )}
           </div>
 
-          <div className="mt-4 space-y-3">
-            <div className="relative">
-              <input
-                type="file"
-                accept=".nii,.nii.gz,.gz,.zip"
-                onChange={handleFileUpload}
-                className="absolute inset-0 z-20 h-full w-full cursor-pointer opacity-0"
-              />
-
-              <div
-                className={cx(
-                  "flex items-center gap-3 rounded-xl border border-dashed p-3 transition",
-                  imageFile || isConverting
-                    ? "border-indigo-500/50 bg-indigo-500/10"
-                    : "border-slate-700 bg-slate-800/30 hover:border-slate-500 hover:bg-slate-800/50",
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-900/70">
+                {isLoadingVolume ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-indigo-400" />
+                ) : (
+                  <Layers
+                    className={cx(
+                      "h-5 w-5",
+                      imageFile ? "text-indigo-400" : "text-slate-500",
+                    )}
+                  />
                 )}
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950/50">
-                  {isConverting || isLoadingFile ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-indigo-400" />
-                  ) : (
-                    <Upload
-                      className={cx(
-                        "h-5 w-5",
-                        imageFile ? "text-indigo-400" : "text-slate-400",
-                      )}
-                    />
-                  )}
-                </div>
+              </div>
 
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-200">
-                    {isConverting
-                      ? "Converting DICOM..."
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-slate-200">
+                  {hasActivePatient
+                    ? isLoadingVolume
+                      ? "Loading CT volume from S3..."
                       : imageFile
-                        ? imageFile.name
-                        : "Upload CT volume"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {isConverting
-                      ? "Please wait"
-                      : imageFile
-                        ? `${(imageFile.size / 1024 / 1024).toFixed(1)} MB · ready`
-                        : ".nii, .nii.gz hoặc .zip DICOM"}
-                  </p>
-                </div>
+                        ? "CT volume ready"
+                        : "CT volume not loaded"
+                    : "No active patient"}
+                </p>
+                <p className="mt-1 break-all text-xs leading-relaxed text-slate-500">
+                  {hasActivePatient
+                    ? `pid=${pid} · series_uid=${seriesUid}`
+                    : "Add or select a patient to auto-load DICOM from S3."}
+                </p>
               </div>
             </div>
-
-            {error && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-300">
-                {error}
-              </div>
-            )}
           </div>
+
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-300">
+              {error}
+            </div>
+          )}
         </div>
 
         <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
@@ -505,7 +362,12 @@ export default function CTViewer({ status }: Props) {
               type="button"
               onClick={handleSegmentation}
               disabled={
-                !imageFile || !prompt.trim() || isProcessing || isConverting
+                !pid ||
+                !seriesUid ||
+                !imageFile ||
+                !prompt.trim() ||
+                isProcessing ||
+                isLoadingVolume
               }
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
             >
@@ -522,7 +384,6 @@ export default function CTViewer({ status }: Props) {
               )}
             </button>
           </div>
-
         </div>
 
         <div
@@ -535,7 +396,8 @@ export default function CTViewer({ status }: Props) {
           <div
             className={cx(
               "flex h-[500px] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl",
-              isFullscreen && "!h-full !min-h-0 !w-full rounded-xl border-slate-700",
+              isFullscreen &&
+              "!h-full !min-h-0 !w-full rounded-xl border-slate-700",
             )}
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/90 px-3 py-2">
@@ -545,8 +407,10 @@ export default function CTViewer({ status }: Props) {
                 </h2>
                 <p className="truncate text-[11px] text-slate-500">
                   {imageFile
-                    ? `${imageFile.name} · Current view: ${activeViewLabel}${isFullscreen ? " · Press Esc to close" : ""}`
-                    : "Upload a NIfTI file to start visualization"}
+                    ? `Current view: ${activeViewLabel}${isFullscreen ? " · Press Esc to close" : ""}`
+                    : hasActivePatient
+                      ? "Waiting for backend volume conversion"
+                      : "No patient selected"}
                 </p>
               </div>
 
@@ -573,7 +437,7 @@ export default function CTViewer({ status }: Props) {
                 <button
                   type="button"
                   onClick={resetViewer}
-                  disabled={!imageFile}
+                  disabled={!imageFile && !segmentation && !prompt}
                   className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-400 transition hover:border-slate-500 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RotateCcw className="h-3 w-3" />
@@ -587,19 +451,25 @@ export default function CTViewer({ status }: Props) {
                 <Viewer
                   key={viewerKey}
                   image={imageFile}
-                  segmentations={segmentations}
+                  segmentation={segmentation}
                   sliceType={sliceType}
                   onSliceTypeChange={setSliceType}
                 />
               ) : (
                 <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-4 bg-slate-950/60 p-6 text-center text-slate-500">
-                  <Layers className="h-14 w-14 opacity-25" />
+                  {isLoadingVolume ? (
+                    <Loader2 className="h-14 w-14 animate-spin text-indigo-400/60" />
+                  ) : (
+                    <Layers className="h-14 w-14 opacity-25" />
+                  )}
                   <div>
                     <p className="text-sm font-semibold text-slate-400">
-                      No CT volume loaded
+                      {hasActivePatient ? "No CT volume loaded" : "No active patient"}
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                      Upload .nii hoặc .nii.gz để kiểm tra NiiVue viewer trước.
+                      {hasActivePatient
+                        ? "Backend sẽ tự tải dicom-raw/{pid}/{series_uid}.zip từ S3 và convert sang NIfTI tạm."
+                        : "Add hoặc chọn patient để tự động load CT volume."}
                     </p>
                   </div>
                 </div>
@@ -610,134 +480,61 @@ export default function CTViewer({ status }: Props) {
 
         <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
           <div className="flex items-center justify-between gap-2">
-            <SectionTitle>Segmentations</SectionTitle>
+            <SectionTitle>Current Segmentation</SectionTitle>
             <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-              {segmentations.length}
+              {segmentation ? "1" : "0"}
             </span>
           </div>
 
-          {segmentations.length === 0 ? (
+          {!segmentation ? (
             <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
-              Chưa có mask segmentation.
+              Chưa có mask segmentation. Mỗi prompt mới sẽ thay thế mask hiện tại.
             </div>
           ) : (
-            <div className="space-y-2">
-              {segmentations.map((segmentation) => (
-                <div
-                  key={segmentation.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: segmentation.displayColor }}
-                    />
-                    <div className="min-w-0">
-                      <p
-                        className="truncate text-sm font-medium text-slate-300"
-                        title={segmentation.prompt}
-                      >
-                        {segmentation.prompt}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility(segmentation.id)}
-                      title={segmentation.isVisible ? "Hide" : "Show"}
-                      className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
-                    >
-                      {segmentation.isVisible ? (
-                        <Eye className="h-4 w-4" />
-                      ) : (
-                        <EyeOff className="h-4 w-4" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteSegmentation(segmentation.id)}
-                      title="Delete"
-                      className="rounded-md p-1.5 text-slate-500 transition hover:bg-red-500/10 hover:text-red-400"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
+                  <p
+                    className="truncate text-sm font-medium text-slate-300"
+                    title={segmentation.prompt}
+                  >
+                    {segmentation.prompt}
+                  </p>
                 </div>
-              ))}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSegmentation((prev) =>
+                      prev ? { ...prev, isVisible: !prev.isVisible } : prev,
+                    )
+                  }
+                  title={segmentation.isVisible ? "Hide" : "Show"}
+                  className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                >
+                  {segmentation.isVisible ? (
+                    <Eye className="h-4 w-4" />
+                  ) : (
+                    <EyeOff className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
-          {segmentations.length > 0 &&
-            (inputFormat === "nifti" ? (
+          {segmentation && (
+            <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
                 onClick={handleDownload}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-slate-600 hover:bg-slate-800"
               >
                 <Download className="h-4 w-4" />
-                Download{" "}
-                {segmentations.length === 1
-                  ? "Segmentation"
-                  : `All (${segmentations.length})`}
+                Download Segmentation (.nii.gz)
               </button>
-            ) : (
-              <div className="relative" ref={downloadMenuRef}>
-                {showDownloadMenu && (
-                  <div className="absolute bottom-full left-0 right-0 z-30 mb-2 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-xl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleDownload();
-                        setShowDownloadMenu(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-700"
-                    >
-                      <Download className="h-4 w-4" />
-                      NIfTI (.nii.gz)
-                    </button>
-                    <div className="border-t border-slate-700" />
-                    <button
-                      type="button"
-                      onClick={handleExportRtstruct}
-                      disabled={isExporting}
-                      className="flex w-full items-center gap-2 px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      {isExporting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4" />
-                      )}
-                      RTSTRUCT (.dcm)
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setShowDownloadMenu((prev) => !prev)}
-                  disabled={isExporting}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 disabled:opacity-50"
-                >
-                  {isExporting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Exporting...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4" />
-                      Download{" "}
-                      {segmentations.length === 1
-                        ? "Segmentation"
-                        : `All (${segmentations.length})`}
-                      <ChevronUp className="h-3 w-3" />
-                    </>
-                  )}
-                </button>
-              </div>
-            ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -746,12 +543,11 @@ export default function CTViewer({ status }: Props) {
 
 interface ViewerProps {
   image?: File | string | null;
-  segmentations?: Array<{
-    id: string;
+  segmentation?: {
     file: File | string;
     color: string;
     isVisible: boolean;
-  }>;
+  } | null;
   sliceType?: SLICE_TYPE;
   onSliceTypeChange?: (st: SLICE_TYPE) => void;
 }
@@ -760,50 +556,40 @@ const SLICE_OPTIONS: { label: string; value: SLICE_TYPE }[] = [
   { label: "Axial", value: SLICE_TYPE.AXIAL },
   { label: "Coronal", value: SLICE_TYPE.CORONAL },
   { label: "Sagittal", value: SLICE_TYPE.SAGITTAL },
-  { label: "Multi", value: SLICE_TYPE.MULTIPLANAR },
 ];
 
-// Which fraction axis each slice type controls
 const SLICE_AXIS: Record<number, number> = {
-  [SLICE_TYPE.AXIAL]: 2, // Z
-  [SLICE_TYPE.CORONAL]: 1, // Y
-  [SLICE_TYPE.SAGITTAL]: 0, // X
+  [SLICE_TYPE.AXIAL]: 2,
+  [SLICE_TYPE.CORONAL]: 1,
+  [SLICE_TYPE.SAGITTAL]: 0,
 };
 
 function Viewer({
   image,
-  segmentations = [],
-  sliceType = SLICE_TYPE.MULTIPLANAR,
+  segmentation,
+  sliceType = SLICE_TYPE.AXIAL,
   onSliceTypeChange,
 }: ViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nv, setNv] = useState<Niivue | null>(null);
-  const loadedSegIdsRef = useRef<Set<string>>(new Set());
-  // Bottom toolbar visibility
+  const loadedSegRef = useRef(false);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
-  // Slice position fraction (0-1) for the slider
   const [sliceFrac, setSliceFrac] = useState(0.5);
-  // Total number of slices for the current axis
   const [totalSlices, setTotalSlices] = useState(0);
-  // Stable ref to updateSliceInfo so image-loading effect doesn't re-trigger on sliceType change
   const updateSliceInfoRef = useRef<() => void>(() => { });
-  // Ref to current sliceType so onLocationChange avoids stale closures
   const sliceTypeRef = useRef(sliceType);
   sliceTypeRef.current = sliceType;
-  // Windowing (gray intensity mapping) state
   const [winMin, setWinMin] = useState(0);
   const [winMax, setWinMax] = useState(1);
-  const [winRange, setWinRange] = useState<[number, number]>([0, 1]); // [global_min, global_max]
+  const [winRange, setWinRange] = useState<[number, number]>([0, 1]);
 
-  // Resize handler to eliminate gray bars
   const handleResize = useCallback(() => {
     if (!containerRef.current || !canvasRef.current || !nv) return;
 
     const { clientWidth, clientHeight } = containerRef.current;
     const dpr = window.devicePixelRatio || 1;
 
-    // Set canvas size to match container exactly
     canvasRef.current.width = clientWidth * dpr;
     canvasRef.current.height = clientHeight * dpr;
     canvasRef.current.style.width = `${clientWidth}px`;
@@ -812,28 +598,25 @@ function Viewer({
     nv.resizeListener();
   }, [nv]);
 
-  // Compute total slices for the current axis
   const updateSliceInfo = useCallback(() => {
     if (!nv || nv.volumes.length === 0) return;
     const vol = nv.volumes[0];
-    const dims = vol.dims; // [3, nx, ny, nz, ...]
+    const dims = vol.dims;
     if (!dims) return;
     const axis = SLICE_AXIS[sliceType as number];
     if (axis !== undefined) {
-      setTotalSlices(dims[axis + 1] || 1); // dims is 1-indexed: dims[1]=nx, dims[2]=ny, dims[3]=nz
+      setTotalSlices(dims[axis + 1] || 1);
     }
-    // Sync slider with current crosshair position
     const pos = nv.scene.crosshairPos;
     if (pos && axis !== undefined) {
       setSliceFrac(pos[axis]);
     }
   }, [nv, sliceType]);
 
-  // Keep ref in sync with latest callback
   updateSliceInfoRef.current = updateSliceInfo;
 
   useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+    if (!canvasRef.current) return;
 
     const niivue = new Niivue({
       backColor: [0, 0, 0, 1],
@@ -841,9 +624,7 @@ function Viewer({
     });
 
     niivue.attachToCanvas(canvasRef.current);
-    niivue.setSliceType(niivue.sliceTypeMultiplanar);
-    niivue.setMultiplanarLayout(2);
-    niivue.setMultiplanarPadPixels(0);
+    niivue.setSliceType(sliceType);
 
     niivue.onImageLoaded = () => {
       if (niivue.volumes.length > 0) {
@@ -863,13 +644,8 @@ function Viewer({
     };
 
     setNv(niivue);
-
-    return () => {
-      // Cleanup
-    };
   }, []);
 
-  // Set up ResizeObserver to handle container size changes
   useEffect(() => {
     if (!containerRef.current || !nv) return;
 
@@ -886,27 +662,21 @@ function Viewer({
     };
   }, [nv, handleResize]);
 
-  // Effect to sync the slice type from props
   useEffect(() => {
     if (!nv) return;
     nv.setSliceType(sliceType);
-    if (sliceType === SLICE_TYPE.MULTIPLANAR) {
-      nv.setMultiplanarLayout(2); // GRID
-      nv.setMultiplanarPadPixels(0);
-    }
     nv.updateGLVolume();
     handleResize();
     updateSliceInfo();
   }, [nv, sliceType, handleResize, updateSliceInfo]);
 
-  // Effect to handle base image
   useEffect(() => {
     if (!nv || !image) return;
 
     const loadVolume = async () => {
       try {
         nv.volumes = [];
-        loadedSegIdsRef.current.clear();
+        loadedSegRef.current = false;
 
         if (typeof image === "string") {
           await nv.loadVolumes([{ url: image }]);
@@ -925,7 +695,6 @@ function Viewer({
       handleResize();
       updateSliceInfoRef.current();
 
-      // Initialize windowing from loaded volume
       if (nv.volumes.length > 0) {
         const vol = nv.volumes[0];
         setWinMin(vol.cal_min ?? vol.global_min ?? 0);
@@ -935,10 +704,57 @@ function Viewer({
     };
 
     loadVolume();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nv, image, handleResize]);
 
-  // Slice navigation handler — called from slider
+  useEffect(() => {
+    if (!nv || !image) return;
+
+    const syncSegmentation = async () => {
+      while (nv.volumes.length > 1) {
+        nv.removeVolume(nv.volumes[nv.volumes.length - 1]);
+      }
+      loadedSegRef.current = false;
+
+      if (!segmentation) {
+        nv.updateGLVolume();
+        return;
+      }
+
+      try {
+        const opacity = segmentation.isVisible ? 0.5 : 0;
+        let vol;
+
+        if (typeof segmentation.file === "string") {
+          vol = await NVImage.loadFromUrl({
+            url: segmentation.file,
+            colormap: segmentation.color,
+            opacity,
+            name: "voxtell_segmentation",
+          });
+        } else if (segmentation.file instanceof File) {
+          vol = await NVImage.loadFromFile({
+            file: segmentation.file,
+            name: "voxtell_segmentation",
+            colormap: segmentation.color,
+            opacity,
+          });
+        }
+
+        if (vol) {
+          vol.name = "voxtell_segmentation";
+          nv.addVolume(vol);
+          loadedSegRef.current = true;
+        }
+      } catch (e) {
+        console.error("Failed to load segmentation:", e);
+      }
+
+      nv.updateGLVolume();
+    };
+
+    syncSegmentation();
+  }, [nv, segmentation, image]);
+
   const handleSliceChange = useCallback(
     (fraction: number) => {
       if (!nv || nv.volumes.length === 0) return;
@@ -954,12 +770,10 @@ function Viewer({
     [nv, sliceType],
   );
 
-  // Windowing change handler — sets cal_min/cal_max on the base volume
   const handleWindowChange = useCallback(
     (newMin: number, newMax: number) => {
       if (!nv || nv.volumes.length === 0) return;
       const vol = nv.volumes[0];
-      // Prevent crossing: enforce at least a tiny gap
       const step = (winRange[1] - winRange[0]) / 500;
       if (newMin >= newMax) return;
       if (newMax - newMin < step) return;
@@ -972,98 +786,9 @@ function Viewer({
     [nv, winRange],
   );
 
-  // Effect to handle segmentations
-  // Uses name-based volume matching instead of fragile numeric indices
-  useEffect(() => {
-    if (!nv || !image) return;
-
-    // Helper: find a NiiVue volume by the segmentation id (stored as vol.name)
-    const findVolumeBySegId = (segId: string) => {
-      // Skip index 0 (the base image)
-      for (let i = 1; i < nv.volumes.length; i++) {
-        if (nv.volumes[i].name === segId) {
-          return nv.volumes[i];
-        }
-      }
-      return null;
-    };
-
-    const syncSegmentations = async () => {
-      const currentIds = new Set(segmentations.map((s) => s.id));
-      const loadedIds = new Set(loadedSegIdsRef.current);
-
-      // 1. Remove segmentations that are no longer in props
-      const idsToRemove = [...loadedIds].filter((id) => !currentIds.has(id));
-      for (const id of idsToRemove) {
-        const vol = findVolumeBySegId(id);
-        if (vol) {
-          nv.removeVolume(vol);
-        }
-        loadedSegIdsRef.current.delete(id);
-      }
-
-      // 2. Add new segmentations and update visibility for existing ones
-      for (const seg of segmentations) {
-        if (loadedSegIdsRef.current.has(seg.id)) {
-          // Already loaded — just sync visibility
-          const vol = findVolumeBySegId(seg.id);
-          if (vol) {
-            const newOpacity = seg.isVisible ? 0.5 : 0;
-            if (vol.opacity !== newOpacity) {
-              vol.opacity = newOpacity;
-            }
-          }
-        } else {
-          // New segmentation — load it
-          try {
-            let vol;
-            const opacity = seg.isVisible ? 0.5 : 0;
-            const colormap = seg.color;
-
-            if (typeof seg.file === "string") {
-              vol = await NVImage.loadFromUrl({
-                url: seg.file,
-                colormap: colormap,
-                opacity: opacity,
-                name: seg.id, // tag with seg id for reliable lookup
-              });
-            } else if (seg.file instanceof File) {
-              vol = await NVImage.loadFromFile({
-                file: seg.file,
-                name: seg.id,
-                colormap: colormap,
-                opacity: opacity,
-              });
-            }
-
-            if (vol) {
-              // Ensure the name matches the seg id for lookup
-              vol.name = seg.id;
-              nv.addVolume(vol);
-              loadedSegIdsRef.current.add(seg.id);
-            }
-          } catch (e) {
-            console.error("Failed to load seg:", seg.id, e);
-          }
-        }
-      }
-
-      nv.updateGLVolume();
-    };
-
-    syncSegmentations();
-  }, [nv, segmentations, image]);
-
-  // Determine current slice state
-  const isSingleAxis =
-    sliceType !== SLICE_TYPE.MULTIPLANAR && sliceType !== SLICE_TYPE.RENDER;
-  const currentSliceNum =
-    Math.round(sliceFrac * Math.max(totalSlices - 1, 1)) + 1;
-
-  // Windowing slider computed values
+  const currentSliceNum = Math.round(sliceFrac * Math.max(totalSlices - 1, 1)) + 1;
   const hasVolume = nv !== null && nv.volumes.length > 0;
   const winStep = (winRange[1] - winRange[0]) / 500 || 1;
-  // Gradient positions as percentages for the track background
   const rangeSpan = winRange[1] - winRange[0] || 1;
   const minPct = ((winMin - winRange[0]) / rangeSpan) * 100;
   const maxPct = ((winMax - winRange[0]) / rangeSpan) * 100;
@@ -1085,13 +810,10 @@ function Viewer({
         }}
       />
 
-      {/* Toolbar toggle button */}
       {image && (
         <button
           onClick={() => setIsToolbarVisible((prev) => !prev)}
-          className="absolute top-3 right-3 z-20 p-1.5 bg-slate-800/80 backdrop-blur-sm
-                               border border-slate-700/60 rounded-lg text-slate-400
-                               hover:text-white hover:bg-slate-700/80 transition-all duration-200 shadow-md"
+          className="absolute top-3 right-3 z-20 p-1.5 bg-slate-800/80 backdrop-blur-sm border border-slate-700/60 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/80 transition-all duration-200 shadow-md"
           title={isToolbarVisible ? "Hide controls" : "Show controls"}
         >
           {isToolbarVisible ? (
@@ -1102,21 +824,19 @@ function Viewer({
         </button>
       )}
 
-      {/* Bottom control bar */}
       {image && (
         <div
           className={`
-                        absolute bottom-3 left-3 right-3 z-10 flex flex-col gap-2
-                        rounded-xl border border-slate-700/60 bg-slate-900/90 px-3 py-2 shadow-lg backdrop-blur-md
-                        transition-all duration-300 ease-in-out
-                        ${isToolbarVisible
+            absolute bottom-3 left-3 right-3 z-10 flex flex-col gap-2
+            rounded-xl border border-slate-700/60 bg-slate-900/90 px-3 py-2 shadow-lg backdrop-blur-md
+            transition-all duration-300 ease-in-out
+            ${isToolbarVisible
               ? "opacity-100 translate-y-0"
               : "opacity-0 translate-y-4 pointer-events-none"
             }
-                    `}
+          `}
         >
-          {/* Slice slider — visible only in single-axis views */}
-          {isSingleAxis && totalSlices > 1 && (
+          {totalSlices > 1 && (
             <div className="flex min-w-0 items-center gap-2">
               <span className="w-16 shrink-0 text-center font-mono text-[10px] text-slate-400">
                 {currentSliceNum}/{totalSlices}
@@ -1127,16 +847,13 @@ function Viewer({
                 max={1}
                 step={1 / Math.max(totalSlices - 1, 1)}
                 value={sliceFrac}
-                onChange={(e) =>
-                  handleSliceChange(parseFloat(e.target.value))
-                }
+                onChange={(e) => handleSliceChange(parseFloat(e.target.value))}
                 className="h-1 min-w-0 flex-1 cursor-pointer accent-indigo-500"
                 title={`Slice ${currentSliceNum} of ${totalSlices}`}
               />
             </div>
           )}
 
-          {/* Windowing slider — stacked row to avoid overlap in narrow CT panel */}
           {hasVolume && (
             <div className="flex min-w-0 items-center gap-2">
               <span className="w-7 shrink-0 whitespace-nowrap font-mono text-[10px] text-slate-400">
@@ -1182,24 +899,21 @@ function Viewer({
             </div>
           )}
 
-          {/* Layout / Axis Selector — own row so labels never overwrite sliders */}
-          <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-950/50 p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-950/50 p-1">
             {SLICE_OPTIONS.map((opt) => {
               const isActive = sliceType === opt.value;
               return (
                 <button
                   key={opt.label}
                   type="button"
-                  onClick={() => {
-                    onSliceTypeChange?.(opt.value);
-                  }}
+                  onClick={() => onSliceTypeChange?.(opt.value)}
                   className={`
-                                        rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all duration-200
-                                        ${isActive
+                    rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all duration-200
+                    ${isActive
                       ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/40"
                       : "text-slate-400 hover:bg-slate-700/60 hover:text-white"
                     }
-                                    `}
+                  `}
                   title={opt.label}
                 >
                   {opt.label}

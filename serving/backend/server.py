@@ -1,7 +1,9 @@
 """
 Merged FastAPI backend:
 - AI Medical Department API (/api/v1/analyze, patient history routes, etc.)
-- VoxTell CT Viewer endpoints (/predict, /convert, /export-rtstruct, /session/{session_id})
+- VoxTell CT Viewer endpoints using patient-based S3 DICOM source:
+    GET  /voxtell/volume/{pid}/{series_uid}
+    POST /voxtell/predict
 
 Run examples from repo root:
   uvicorn serving.backend.server:app --host 0.0.0.0 --port 1711
@@ -10,7 +12,6 @@ Run examples from repo root:
 
 import gc
 import glob
-import json
 import logging
 import os
 import sys
@@ -30,37 +31,21 @@ PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "../.."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-import nibabel as nib
-import numpy as np
+import boto3
 import pydicom
 import torch
 import uvicorn
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from nnunetv2.imageio.nibabel_reader_writer import NibabelIOWithReorient
-from rt_utils import RTStructBuilder
+from starlette.background import BackgroundTask
 
 from serving.backend.pipeline import MedicalPipeline
 from serving.backend.routes import router
 from voxtell.inference.predictor import VoxTellPredictor
-
-# Works whether this file is placed at repo root or inside serving/backend
-try:
-    from dicom_sessions import (
-        cleanup_expired,
-        cleanup_session,
-        create_session,
-        get_session_dicom_dir,
-    )
-except ImportError:
-    from serving.backend.dicom_sessions import (
-        cleanup_expired,
-        cleanup_session,
-        create_session,
-        get_session_dicom_dir,
-    )
 
 load_dotenv()
 
@@ -78,7 +63,7 @@ app = FastAPI(title="AI Medical Department + VoxTell", version="0.1.0")
 
 # If CORS_ORIGINS is not set, allow all origins but do not use credentials with wildcard.
 # Example explicit value:
-#   CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+#   CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://ai-medical-dept.vercel.app
 raw_origins = os.getenv("CORS_ORIGINS", "*")
 allow_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 allow_credentials = "*" not in allow_origins
@@ -89,7 +74,6 @@ app.add_middleware(
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Session-Id"],
 )
 
 DEFAULT_VOXTELL_MODEL_DIR = os.path.abspath(
@@ -98,7 +82,11 @@ DEFAULT_VOXTELL_MODEL_DIR = os.path.abspath(
 VOXTELL_MODEL_DIR = os.getenv("VOXTELL_MODEL_DIR", DEFAULT_VOXTELL_MODEL_DIR)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "").strip()
+AWS_REGION = os.getenv("AWS_REGION", "").strip() or None
+
 predictor: VoxTellPredictor | None = None
+_s3_client = None
 
 
 @app.on_event("startup")
@@ -138,66 +126,74 @@ app.include_router(router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------
-# VoxTell DICOM helpers
+# S3 + DICOM helpers
 # ---------------------------------------------------------------------------
 
-def _reorient_nifti_mask_to_dicom(nii_path: str, sorted_series_data: list) -> np.ndarray:
-    """Reorient a NIfTI mask to match the DICOM pixel grid expected by rt-utils.
+def _get_s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client("s3", region_name=AWS_REGION)
+    return _s3_client
 
-    rt-utils expects mask shape (Columns, Rows, num_slices) where axes correspond
-    to the DICOM pixel grid, not the NIfTI RAS voxel grid.
-    dcm2niix reorients to RAS, so this computes axis permutation and flips from
-    the NIfTI affine and DICOM geometry.
+
+def _require_bucket() -> str:
+    if not S3_BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="S3_BUCKET_NAME is not configured.")
+    return S3_BUCKET_NAME
+
+
+def _dicom_s3_key_candidates(pid: str, series_uid: str) -> list[str]:
+    """Build possible keys for the patient DICOM zip.
+
+    Primary expected structure:
+        dicom-raw/{pid}/{series_uid}.zip
+
+    A fallback without .zip is kept because some DB rows display the key without
+    the suffix in tooling, while the object may still be named exactly that way.
     """
-    nii = nib.load(nii_path)
-    mask = np.asanyarray(nii.dataobj).astype(bool)
-    affine = nii.affine
+    base = f"dicom-raw/{pid}/{series_uid}"
+    if base.lower().endswith(".zip"):
+        return [base]
+    return [f"{base}.zip", base]
 
-    ref_dcm = sorted_series_data[0]
 
-    iop = np.array(ref_dcm.ImageOrientationPatient, dtype=float)
-    row_cosine_lps = iop[:3]   # direction of increasing column index
-    col_cosine_lps = iop[3:]   # direction of increasing row index
+def _download_patient_dicom_zip(pid: str, series_uid: str, output_path: str) -> str:
+    bucket = _require_bucket()
+    client = _get_s3_client()
+    last_error: Exception | None = None
 
-    if len(sorted_series_data) > 1:
-        pos0 = np.array(sorted_series_data[0].ImagePositionPatient, dtype=float)
-        pos1 = np.array(sorted_series_data[1].ImagePositionPatient, dtype=float)
-        slice_dir_lps = pos1 - pos0
-        slice_dir_lps = slice_dir_lps / np.linalg.norm(slice_dir_lps)
-    else:
-        slice_dir_lps = np.cross(row_cosine_lps, col_cosine_lps)
+    for key in _dicom_s3_key_candidates(pid, series_uid):
+        try:
+            logger.info("Downloading DICOM zip from s3://%s/%s", bucket, key)
+            client.download_file(bucket, key, output_path)
+            return key
+        except ClientError as exc:
+            last_error = exc
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in {"404", "NoSuchKey", "NotFound"}:
+                continue
+            logger.exception("S3 download failed for key=%s", key)
+            raise HTTPException(status_code=500, detail=f"Cannot download DICOM zip from S3: {exc}") from exc
 
-    lps_to_ras = np.array([-1, -1, 1], dtype=float)
-
-    dicom_axes_ras = np.column_stack(
-        [
-            col_cosine_lps * lps_to_ras,
-            row_cosine_lps * lps_to_ras,
-            slice_dir_lps * lps_to_ras,
-        ]
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "DICOM zip not found in S3. Tried: "
+            + ", ".join(_dicom_s3_key_candidates(pid, series_uid))
+            + (f". Last error: {last_error}" if last_error else "")
+        ),
     )
 
-    nii_axes_ras = np.zeros((3, 3))
-    for ax in range(3):
-        vector = affine[:3, ax]
-        nii_axes_ras[:, ax] = vector / np.linalg.norm(vector)
 
-    corr = nii_axes_ras.T @ dicom_axes_ras
-
-    perm: list[int] = []
-    flips: list[bool] = []
-    for dicom_ax in range(3):
-        abs_corr = np.abs(corr[:, dicom_ax])
-        nii_ax = int(np.argmax(abs_corr))
-        perm.append(nii_ax)
-        flips.append(bool(corr[nii_ax, dicom_ax] < 0))
-
-    result = np.transpose(mask, perm)
-    for ax, should_flip in enumerate(flips):
-        if should_flip:
-            result = np.flip(result, axis=ax)
-
-    return np.ascontiguousarray(result)
+def _safe_extract_zip(zip_path: str, extract_dir: str) -> None:
+    """Extract zip safely, preventing path traversal."""
+    with zipfile.ZipFile(zip_path, "r") as zip_file:
+        root = os.path.abspath(extract_dir)
+        for member in zip_file.infolist():
+            target = os.path.abspath(os.path.join(extract_dir, member.filename))
+            if not target.startswith(root + os.sep) and target != root:
+                raise HTTPException(status_code=400, detail="Invalid zip path detected.")
+        zip_file.extractall(extract_dir)
 
 
 def _find_dicom_dir(root: str) -> str | None:
@@ -246,25 +242,115 @@ def convert_dicom_to_nifti(dicom_dir: str, output_dir: str) -> str:
     return max(nifti_files, key=os.path.getsize)
 
 
+def _patient_dicom_zip_to_nifti(pid: str, series_uid: str, work_dir: str) -> tuple[str, str]:
+    """Download dicom-raw/{pid}/{series_uid}.zip from S3 and convert to NIfTI.
+
+    Returns:
+        (nifti_path, dicom_s3_key_used)
+    """
+    zip_path = os.path.join(work_dir, "dicom.zip")
+    s3_key = _download_patient_dicom_zip(pid, series_uid, zip_path)
+
+    extract_dir = os.path.join(work_dir, "extracted")
+    os.makedirs(extract_dir, exist_ok=True)
+
+    try:
+        _safe_extract_zip(zip_path, extract_dir)
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Invalid DICOM zip file in S3.") from exc
+
+    dicom_dir = _find_dicom_dir(extract_dir)
+    if dicom_dir is None:
+        raise HTTPException(status_code=400, detail="No DICOM files found in S3 zip.")
+
+    nifti_out_dir = os.path.join(work_dir, "nifti")
+    os.makedirs(nifti_out_dir, exist_ok=True)
+
+    try:
+        nifti_path = convert_dicom_to_nifti(dicom_dir, nifti_out_dir)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return nifti_path, s3_key
+
+
+def _cleanup_file(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        logger.warning("Failed to remove temp file: %s", path, exc_info=True)
+
+
 # ---------------------------------------------------------------------------
-# VoxTell endpoints
+# VoxTell patient-based endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/predict")
-async def predict(
-    image: Annotated[UploadFile, File()],
+@app.get("/voxtell/volume/{pid}/{series_uid:path}")
+async def get_voxtell_volume(pid: str, series_uid: str):
+    """Return a temporary .nii.gz volume converted from S3 DICOM zip.
+
+    Source object:
+        s3://{S3_BUCKET_NAME}/dicom-raw/{pid}/{series_uid}.zip
+    """
+    pid = pid.strip()
+    series_uid = series_uid.strip()
+    if not pid or not series_uid:
+        raise HTTPException(status_code=400, detail="pid and series_uid are required.")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        nifti_path, s3_key = _patient_dicom_zip_to_nifti(pid, series_uid, temp_dir)
+
+        final_path = os.path.join(
+            tempfile.gettempdir(),
+            f"voxtell_volume_{pid}_{os.urandom(8).hex()}.nii.gz",
+        )
+        shutil.copy(nifti_path, final_path)
+
+    logger.info("Prepared VoxTell volume for pid=%s series=%s from key=%s", pid, series_uid, s3_key)
+
+    return FileResponse(
+        final_path,
+        media_type="application/gzip",
+        filename=f"{pid}_{series_uid}.nii.gz",
+        background=BackgroundTask(_cleanup_file, final_path),
+    )
+
+
+@app.post("/voxtell/predict")
+async def voxtell_predict(
+    pid: Annotated[str, Form()],
+    series_uid: Annotated[str, Form()],
     prompt: Annotated[str, Form()],
 ):
+    """Run VoxTell segmentation for an existing patient series in S3.
+
+    The frontend sends only pid, series_uid and prompt. Backend downloads the
+    DICOM zip from S3, converts it to NIfTI internally, runs VoxTell, and returns
+    the segmentation mask as .nii.gz. The mask is not persisted to S3.
+    """
     if predictor is None:
         raise HTTPException(status_code=500, detail="VoxTell model not loaded.")
 
+    pid = pid.strip()
+    series_uid = series_uid.strip()
+    prompt = prompt.strip()
+
+    if not pid or not series_uid:
+        raise HTTPException(status_code=400, detail="pid and series_uid are required.")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required.")
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        input_path = os.path.join(temp_dir, image.filename or "input.nii.gz")
+        nifti_path, s3_key = _patient_dicom_zip_to_nifti(pid, series_uid, temp_dir)
 
-        with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-
-        logger.info("Processing %s with prompt: %r", image.filename, prompt)
+        logger.info(
+            "Running VoxTell segmentation pid=%s series=%s key=%s prompt=%r",
+            pid,
+            series_uid,
+            s3_key,
+            prompt,
+        )
 
         try:
             gc.collect()
@@ -272,151 +358,33 @@ async def predict(
                 torch.cuda.empty_cache()
 
             reader_writer = NibabelIOWithReorient()
-            img, props = reader_writer.read_images([input_path])
+            img, props = reader_writer.read_images([nifti_path])
 
             segmentations = predictor.predict_single_image(img, [prompt])
             seg_result = segmentations[0]
 
-            output_filename = f"segmentation_{image.filename or 'input.nii.gz'}"
-            output_path = os.path.join(temp_dir, output_filename)
+            output_path = os.path.join(temp_dir, "segmentation.nii.gz")
             reader_writer.write_seg(seg_result, output_path, props)
 
+            safe_prompt = "_".join(prompt.split())[:80] or "mask"
             final_output_path = os.path.join(
                 tempfile.gettempdir(),
-                f"voxtell_output_{os.urandom(8).hex()}.nii.gz",
+                f"voxtell_segmentation_{pid}_{os.urandom(8).hex()}.nii.gz",
             )
             shutil.copy(output_path, final_output_path)
 
             return FileResponse(
                 final_output_path,
                 media_type="application/gzip",
-                filename=output_filename,
-                background=None,
+                filename=f"voxtell_{pid}_{safe_prompt}.nii.gz",
+                background=BackgroundTask(_cleanup_file, final_output_path),
             )
 
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("Error during VoxTell inference: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/convert")
-async def convert_dicom(file: Annotated[UploadFile, File()]):
-    """Accept a zipped DICOM folder, convert to NIfTI, return file + session ID."""
-    cleanup_expired()
-
-    if not file.filename or not file.filename.lower().endswith(".zip"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a .zip file containing DICOM data.",
-        )
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        zip_path = os.path.join(temp_dir, file.filename)
-        with open(zip_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        extract_dir = os.path.join(temp_dir, "extracted")
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zip_file:
-                zip_file.extractall(extract_dir)
-        except zipfile.BadZipFile as exc:
-            raise HTTPException(status_code=400, detail="Invalid zip file.") from exc
-
-        dicom_dir = _find_dicom_dir(extract_dir)
-        if dicom_dir is None:
-            raise HTTPException(
-                status_code=400,
-                detail="No DICOM files found in the uploaded zip.",
-            )
-
-        session_id = create_session(dicom_dir)
-
-        nifti_out_dir = os.path.join(temp_dir, "nifti")
-        os.makedirs(nifti_out_dir, exist_ok=True)
-
-        try:
-            nifti_path = convert_dicom_to_nifti(dicom_dir, nifti_out_dir)
-        except RuntimeError as exc:
-            cleanup_session(session_id)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-        final_path = os.path.join(
-            tempfile.gettempdir(),
-            f"voxtell_converted_{os.urandom(8).hex()}.nii.gz",
-        )
-        shutil.copy(nifti_path, final_path)
-
-        logger.info("DICOM converted: session=%s, nifti=%s", session_id, final_path)
-
-        response = FileResponse(
-            final_path,
-            media_type="application/gzip",
-            filename="converted.nii.gz",
-            background=None,
-        )
-        response.headers["X-Session-Id"] = session_id
-        return response
-
-
-@app.post("/export-rtstruct")
-async def export_rtstruct(
-    session_id: Annotated[str, Form()],
-    structure_names: Annotated[str, Form()],
-    segmentation_files: list[UploadFile] = File(...),
-):
-    """Build an RTSTRUCT from stored DICOM series and uploaded masks."""
-    dicom_dir = get_session_dicom_dir(session_id)
-    if dicom_dir is None:
-        raise HTTPException(status_code=404, detail="DICOM session not found or expired.")
-
-    try:
-        names: list[str] = json.loads(structure_names)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail="structure_names must be a JSON array of strings.",
-        ) from exc
-
-    if len(names) != len(segmentation_files):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Got {len(names)} names but {len(segmentation_files)} segmentation files.",
-        )
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        rtstruct = RTStructBuilder.create_new(dicom_series_path=dicom_dir)
-
-        for seg_file, name in zip(segmentation_files, names):
-            seg_path = os.path.join(temp_dir, seg_file.filename or "seg.nii.gz")
-            with open(seg_path, "wb") as buffer:
-                shutil.copyfileobj(seg_file.file, buffer)
-
-            mask = _reorient_nifti_mask_to_dicom(seg_path, rtstruct.series_data)
-            rtstruct.add_roi(mask=mask, name=name)
-
-        output_path = os.path.join(temp_dir, "rtstruct.dcm")
-        rtstruct.save(output_path)
-
-        final_path = os.path.join(
-            tempfile.gettempdir(),
-            f"voxtell_rtstruct_{os.urandom(8).hex()}.dcm",
-        )
-        shutil.copy(output_path, final_path)
-
-        logger.info("RTSTRUCT exported: session=%s, structures=%s", session_id, names)
-
-        return FileResponse(
-            final_path,
-            media_type="application/dicom",
-            filename="rtstruct.dcm",
-            background=None,
-        )
-
-
-@app.delete("/session/{session_id}")
-async def delete_session(session_id: str) -> dict[str, str]:
-    cleanup_session(session_id)
-    return {"status": "ok"}
 
 
 if __name__ == "__main__":

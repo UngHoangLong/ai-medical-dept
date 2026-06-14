@@ -59,6 +59,7 @@ image = (
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install voxtell'",
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install python-multipart'",
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install boto3 python-dotenv'",
+        "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && python -m pip install asyncpg'",
 
         # Cài local repo
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && cd /app && python -m pip install -e .'",

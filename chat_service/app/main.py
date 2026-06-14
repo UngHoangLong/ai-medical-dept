@@ -4,6 +4,7 @@ from app.api.v1.chat import router
 from app.config import settings
 from app.graphs.main_graph import MainGraph
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -35,7 +36,8 @@ async def lifespan(app: FastAPI):
                      stream=settings.ENABLE_STREAMING, 
                      timeout=settings.LLM_TIMEOUT, 
                      max_retries=settings.LLM_MAX_RETRIES, 
-                     api_key=settings.DEEPSEEK_API_KEY)
+                     api_key=settings.DEEPSEEK_API_KEY,
+                     base_url="https://api.deepseek.com")
 
     # Khởi tạo MCP Tools của bạn ở đây (ví dụ: search tool, database query tool...)
     mcp_client = MultiServerMCPClient({
@@ -64,9 +66,24 @@ async def lifespan(app: FastAPI):
     # Khi tắt Server thì đóng kết nối
     await pool.close()
     print("🛑 Đã đóng kết nối Database.")
-    
+
+
 # Đưa lifespan vào FastAPI
 app = FastAPI(title="LangGraph Agent Backend", lifespan=lifespan)
+# --- THÊM TOÀN BỘ ĐOẠN CODE NÀY VÀO ĐÂY ---
+# Danh sách các domain được phép gọi API (Frontend URL)
+origins = [
+    "http://localhost:5173",  # Cổng mặc định của React Vite
+    "http://127.0.0.1:5173",
+    # Mẹo: Sau này đem lên server thật, bạn thêm domain FE vào đây (vd: "https://medai.com")
+]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       # Cho phép các domain trong danh sách
+    allow_credentials=True,      # Cho phép gửi cookie/token (rất cần cho bảo mật sau này)
+    allow_methods=["*"],         # Cho phép tất cả các hàm (GET, POST, PUT, DELETE, OPTIONS...)
+    allow_headers=["*"],         # Cho phép tất cả các headers
+)
 # Gắn Router
 app.include_router(router)

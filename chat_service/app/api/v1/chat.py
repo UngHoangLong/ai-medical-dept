@@ -1,51 +1,40 @@
-# Import Postgres Saver và Pool
 import json
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-# from ...graphs.basic_chat import BasicChatGraph
-
 router = APIRouter(prefix="/api/v1")
 
+# Payload từ FE gọn gàng hơn
 class ChatContext(BaseModel):
-    # 1. Dữ liệu cốt lõi (Bắt buộc)
-    query: str = Field(..., description="Câu hỏi hoặc tin nhắn của người dùng")
-    thread_id: str = Field(..., description="ID của phiên chat để LangGraph tra cứu State")
-    
-    # 2. Ngữ cảnh Y khoa (Chỉ cần gửi 1 lần ở tin nhắn đầu tiên)
-    patient_id: str | None = Field(None, description="Mã bệnh nhân để kéo dữ liệu lâm sàng")
-    ct_scan_id: str | None = Field(None, description="Mã mẫu CT Scan đang được phân tích")
-    
-    # 3. Thông tin Hệ thống / Audit
-    user_id: str | None = Field(None, description="Mã bác sĩ/người dùng đang thao tác (phục vụ log hệ thống)")
-
-# 1. Kế thừa BaseModel để FastAPI nhận diện request body
-class BasicChatContext(BaseModel):
-    query: str
-    
+    query: str = Field(..., description="Câu hỏi của người dùng")
+    report_id: str = Field(..., description="Vừa dùng để query DB, vừa làm thread_id cho LangGraph")
+    user_id: str | None = Field(None, description="Mã bác sĩ (phục vụ log audit)")
 
 @router.post("/chat")
 async def chat(request: Request, context: ChatContext):
     
-    input_state = {"messages": [("user", context.query)]}
+    # 1. Truyền report_id vào State để node init_context có thể fetch DB
+    input_state = {
+        "messages": [("user", context.query)],
+        "report_id": context.report_id
+    }
+    
     main_graph = request.state.main_graph
-    # Cấu hình thread_id để LangGraph chọc đúng vào DB lấy lịch sử ra
-    config = {"configurable": {"thread_id": context.thread_id}}
+    db_pool = request.state.db_pool
+    
+    config = {"configurable": {"thread_id": context.report_id, "db_pool": db_pool}}
     
     async def event_generator():
         try:
-            # Chạy graph với config chứa thread_id
             async for chunk in main_graph.graph.astream(
                 input_state, 
                 stream_mode=['updates', 'messages'],  
                 version="v2",
                 config=config,
-                subgraphs=True
+                subgraphs=True # Bắt buộc phải = True để nghe được sub-graph
             ):
-                
-                # Bóc tách thủ công từ cấu trúc từ điển của v2
                 stream_mode = chunk["type"]
                 chunk_data = chunk["data"]
                 
@@ -59,44 +48,45 @@ async def chat(request: Request, context: ChatContext):
                         }
                         yield f"data: {json.dumps(payload)}\n\n"
                         
-                        # ---> THÊM ĐOẠN NÀY: Xử lý riêng cho node unsafe_response <---
+                        # Xử lý riêng cho node unsafe_response
                         if node_name == "unsafe_response":
-                            # Bóc tách nội dung message từ state update của node này
                             messages = node_data.get("messages", [])
                             if messages:
                                 last_msg = messages[-1]
-                                # Xử lý cho cả trường hợp object hoặc dict
                                 content = getattr(last_msg, "content", None) or (last_msg.get("content", "") if isinstance(last_msg, dict) else "")
                                 
                                 if content:
-                                    # Ép nó thành dạng 'token' để Frontend in ra màn hình
                                     payload_token = {
                                         "type": "token",
                                         "content": content
                                     }
                                     yield f"data: {json.dumps(payload_token)}\n\n"
 
+                
                 # --- XỬ LÝ EVENT MESSAGES (TOKEN TỪ LLM) ---
                 elif stream_mode == "messages":
                     msg, metadata = chunk_data
+                    
+                    # FIX Ở ĐÂY: Thêm "agent" vào mảng này
+                    valid_nodes = ["casual_chat", "medical_chat", "agent"] 
+                    
                     if msg.__class__.__name__ == "AIMessageChunk":
-                        # Giữ nguyên logic cũ của bạn
-                        if metadata.get("langgraph_node") in ["synthesizer", "casual_chat"]:
+                        is_tool_call = hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0
+                        
+                        if metadata.get("langgraph_node") in valid_nodes and not is_tool_call:
                             if msg.content:
                                 payload = {
                                     "type": "token",
                                     "content": msg.content
                                 }
                                 yield f"data: {json.dumps(payload)}\n\n"
-                    
-            
+                
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
 
 
 # @router.post("/chat-test")

@@ -40,6 +40,12 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     app.state.pipeline = MedicalPipeline()
+    await app.state.pipeline.connect()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.pipeline.close()
 
 
 @app.get("/health")

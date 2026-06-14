@@ -34,7 +34,7 @@ image = (
         "rm /tmp/miniconda.sh",
 
         # Clone repo
-        "git clone https://github.com/ChonJohn1711/voxtell-segmentation-web.git /app",
+        "git clone --depth=1 -b chonjohn/segmentation https://github.com/UngHoangLong/ai-medical-dept.git /app && cd /app && git rev-parse HEAD",
 
         # Accept Anaconda Terms of Service
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main'",

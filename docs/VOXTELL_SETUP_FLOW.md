@@ -389,6 +389,6 @@ uvicorn serving.backend.server:app --host 0.0.0.0 --port 8000
 
 Terminal 2:
 ```txt
-cd /ai-medical-dept/frontend
+cd ai-medical-dept/frontend
 npm run dev
 ```

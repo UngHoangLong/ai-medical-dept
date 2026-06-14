@@ -7,11 +7,12 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL ?? ''
 
 interface Props {
   result: AnalyzeResponse | null
+  reportId: string | null
   cacheKey: string
   status: AnalysisStatus
 }
 
-export default function ChatPanel({ result, cacheKey, status }: Props) {
+export default function ChatPanel({ result, reportId, cacheKey, status }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -44,14 +45,13 @@ export default function ChatPanel({ result, cacheKey, status }: Props) {
     setLoading(true)
 
     try {
-      const resp = await fetch(`${BACKEND}/api/v1/ask`, {
+      const resp = await fetch(`${BACKEND}/api/v1/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cache_key: cacheKey,
-          message: text,
-          history: messages,
-          context: result,
+          query: text,
+          report_id: reportId ?? result?.report_id ?? 'unknown_report_id',
+          user_id: null,
         }),
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)

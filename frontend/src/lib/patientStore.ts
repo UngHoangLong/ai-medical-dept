@@ -8,6 +8,7 @@ export interface PatientEntry {
 
 const PATIENTS_KEY = 'medai_patients'
 const ACTIVE_KEY = 'medai_active_id'
+const ACTIVE_REPORT_KEY = 'medai_active_report_id'
 
 export function patientId(pid: string, series_uid: string): string {
   return `${pid}/${series_uid}`
@@ -33,4 +34,13 @@ export function loadActiveId(): string | null {
 export function saveActiveId(id: string | null) {
   if (id) sessionStorage.setItem(ACTIVE_KEY, id)
   else sessionStorage.removeItem(ACTIVE_KEY)
+}
+
+export function loadActiveReportId(): string | null {
+  return sessionStorage.getItem(ACTIVE_REPORT_KEY)
+}
+
+export function saveActiveReportId(id: string | null) {
+  if (id) sessionStorage.setItem(ACTIVE_REPORT_KEY, id)
+  else sessionStorage.removeItem(ACTIVE_REPORT_KEY)
 }

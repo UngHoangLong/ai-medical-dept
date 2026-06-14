@@ -10,6 +10,7 @@ import PatientTabs from './components/PatientTabs'
 import {
   type PatientEntry, patientId,
   loadPatients, savePatients, loadActiveId, saveActiveId,
+  loadActiveReportId, saveActiveReportId,
 } from './lib/patientStore'
 
 export type AnalysisStatus = 'idle' | 'loading' | 'done' | 'error'
@@ -29,6 +30,8 @@ export default function App() {
   // Multi-patient session — persisted in sessionStorage, restored on F5
   const [patients, setPatients] = useState<PatientEntry[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [reportId, setReportId] = useState<string | null>(() => loadActiveReportId())
+
 
   useEffect(() => {
     const restored = loadPatients()
@@ -75,6 +78,11 @@ export default function App() {
         throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`)
       }
       const data: AnalyzeResponse = await resp.json()
+      const fetched_id = data.report_id ?? 'unknown_report_id'
+      setReportId(fetched_id)
+      saveActiveReportId(fetched_id)
+
+
       const pid = String(formData.get('pid'))
       const series_uid = String(formData.get('series_uid'))
       const id = patientId(pid, series_uid)
@@ -96,6 +104,12 @@ export default function App() {
   function handleSelectPatient(id: string) {
     setActiveId(id)
     saveActiveId(id)
+
+    const selected = patients.find(p => patientId(p.pid, p.series_uid) === id)
+    const nextReportId = selected?.result?.report_id ?? null
+    setReportId(nextReportId)
+    saveActiveReportId(nextReportId)
+
     setErrorMsg(null)
     setStatus('done')
   }
@@ -126,6 +140,9 @@ export default function App() {
       })
       setActiveId(id)
       saveActiveId(id)
+      const nextReportId = data.report_id ?? null
+      setReportId(nextReportId)
+      saveActiveReportId(nextReportId)
       setErrorMsg(null)
       setStatus('done')
       setHistoryOpen(false)
@@ -142,8 +159,11 @@ export default function App() {
       savePatients(next)
       if (activeId === id) {
         const fallback = next.length > 0 ? patientId(next[0].pid, next[0].series_uid) : null
+        const fallbackReportId = next.length > 0 ? next[0].result?.report_id ?? null : null
         setActiveId(fallback)
         saveActiveId(fallback)
+        setReportId(fallbackReportId)
+        saveActiveReportId(fallbackReportId)
         setStatus(fallback ? 'done' : 'idle')
       }
       return next
@@ -240,6 +260,7 @@ export default function App() {
         {chatOpen && (
           <ChatPanel
             result={result}
+            reportId={reportId ?? result?.report_id ?? null}
             cacheKey={cacheKey}
             status={status}
           />

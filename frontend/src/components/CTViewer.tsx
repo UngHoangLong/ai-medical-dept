@@ -35,8 +35,7 @@ type Segmentation = {
   color: string;
 };
 
-const VOXTELL_API_BASE =
-  import.meta.env.VITE_VOXTELL_API_BASE_URL || "http://localhost:1711";
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "";
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -46,6 +45,7 @@ function getSliceTypeLabel(sliceType: SLICE_TYPE) {
   if (sliceType === SLICE_TYPE.AXIAL) return "Axial";
   if (sliceType === SLICE_TYPE.CORONAL) return "Coronal";
   if (sliceType === SLICE_TYPE.SAGITTAL) return "Sagittal";
+  if (sliceType === SLICE_TYPE.MULTIPLANAR) return "Multi";
   return "Viewer";
 }
 
@@ -58,7 +58,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 function buildPatientUrl(path: string, pid: string, seriesUid: string) {
-  return `${VOXTELL_API_BASE}${path}/${encodeURIComponent(pid)}/${encodeURIComponent(seriesUid)}`;
+  return `${BACKEND}${path}/${encodeURIComponent(pid)}/${encodeURIComponent(seriesUid)}`;
 }
 
 async function readError(response: Response, fallback: string) {
@@ -78,7 +78,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [viewerKey, setViewerKey] = useState("empty");
-  const [sliceType, setSliceType] = useState<SLICE_TYPE>(SLICE_TYPE.AXIAL);
+  const [sliceType, setSliceType] = useState<SLICE_TYPE>(SLICE_TYPE.MULTIPLANAR);
   const [segmentation, setSegmentation] = useState<Segmentation | null>(null);
 
   const [prompt, setPrompt] = useState("");
@@ -145,7 +145,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
     setSegmentation(null);
     setShowDownloadMenu(false);
     setError(null);
-    setSliceType(SLICE_TYPE.AXIAL);
+    setSliceType(SLICE_TYPE.MULTIPLANAR);
     setIsFullscreen(false);
 
     if (!pid || !seriesUid) {
@@ -163,7 +163,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
       try {
         const response = await fetch(
-          buildPatientUrl("/voxtell/volume", pid, seriesUid),
+          buildPatientUrl("/api/v1/voxtell/volume", pid, seriesUid),
           { signal: controller.signal },
         );
 
@@ -188,7 +188,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
         setError(
           err instanceof Error
             ? err.message
-            : `Không tải được CT volume. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
+            : `Không tải được CT volume. Kiểm tra backend VoxTell.`,
         );
       } finally {
         if (!controller.signal.aborted) setIsLoadingVolume(false);
@@ -220,7 +220,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
       formData.append("series_uid", seriesUid);
       formData.append("prompt", prompt.trim());
 
-      const response = await fetch(`${VOXTELL_API_BASE}/voxtell/predict`, {
+      const response = await fetch(`${BACKEND}/api/v1/voxtell/predict`, {
         method: "POST",
         body: formData,
       });
@@ -250,7 +250,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
       setError(
         err instanceof Error
           ? err.message
-          : `Không chạy được segmentation. Kiểm tra backend VoxTell tại ${VOXTELL_API_BASE}.`,
+          : `Không chạy được segmentation. Kiểm tra backend VoxTell.`,
       );
     } finally {
       setIsProcessing(false);
@@ -556,6 +556,7 @@ const SLICE_OPTIONS: { label: string; value: SLICE_TYPE }[] = [
   { label: "Axial", value: SLICE_TYPE.AXIAL },
   { label: "Coronal", value: SLICE_TYPE.CORONAL },
   { label: "Sagittal", value: SLICE_TYPE.SAGITTAL },
+  { label: "Multi", value: SLICE_TYPE.MULTIPLANAR },
 ];
 
 const SLICE_AXIS: Record<number, number> = {
@@ -624,7 +625,14 @@ function Viewer({
     });
 
     niivue.attachToCanvas(canvasRef.current);
-    niivue.setSliceType(sliceType);
+
+    if (sliceType === SLICE_TYPE.MULTIPLANAR) {
+      niivue.setSliceType(SLICE_TYPE.MULTIPLANAR);
+      niivue.setMultiplanarLayout(2);
+      niivue.setMultiplanarPadPixels(0);
+    } else {
+      niivue.setSliceType(sliceType);
+    }
 
     niivue.onImageLoaded = () => {
       if (niivue.volumes.length > 0) {
@@ -664,7 +672,15 @@ function Viewer({
 
   useEffect(() => {
     if (!nv) return;
-    nv.setSliceType(sliceType);
+
+    if (sliceType === SLICE_TYPE.MULTIPLANAR) {
+      nv.setSliceType(SLICE_TYPE.MULTIPLANAR);
+      nv.setMultiplanarLayout(2);
+      nv.setMultiplanarPadPixels(0);
+    } else {
+      nv.setSliceType(sliceType);
+    }
+
     nv.updateGLVolume();
     handleResize();
     updateSliceInfo();
@@ -786,6 +802,9 @@ function Viewer({
     [nv, winRange],
   );
 
+  const isSingleAxis =
+    sliceType !== SLICE_TYPE.MULTIPLANAR && sliceType !== SLICE_TYPE.RENDER;
+
   const currentSliceNum = Math.round(sliceFrac * Math.max(totalSlices - 1, 1)) + 1;
   const hasVolume = nv !== null && nv.volumes.length > 0;
   const winStep = (winRange[1] - winRange[0]) / 500 || 1;
@@ -836,7 +855,7 @@ function Viewer({
             }
           `}
         >
-          {totalSlices > 1 && (
+          {isSingleAxis && totalSlices > 1 && (
             <div className="flex min-w-0 items-center gap-2">
               <span className="w-16 shrink-0 text-center font-mono text-[10px] text-slate-400">
                 {currentSliceNum}/{totalSlices}
@@ -899,7 +918,7 @@ function Viewer({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-950/50 p-1">
+          <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-950/50 p-1">
             {SLICE_OPTIONS.map((opt) => {
               const isActive = sliceType === opt.value;
               return (

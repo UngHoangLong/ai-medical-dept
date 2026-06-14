@@ -121,7 +121,7 @@ echo -e "  ${YELLOW}Note:${RESET} VoxTell model loading may take 30–60s."
 (
   cd "$SCRIPT_DIR"
   conda run --no-capture-output -n "$BACKEND_CONDA_ENV" \
-    python -m uvicorn serving.backend.voxtell_modal_server:app \
+    python -m uvicorn serving.backend.server:app \
     --host 0.0.0.0 --port "$BACKEND_PORT"
 ) &
 BACKEND_PID=$!

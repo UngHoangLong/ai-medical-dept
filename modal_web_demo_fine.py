@@ -2,7 +2,7 @@ import modal
 import subprocess
 import time
 
-app = modal.App("ai-medical-dept")
+app = modal.App("ai-medical-dept-voxtell")
 
 # Modal Secret phải chứa:
 # S3_BUCKET_NAME, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY

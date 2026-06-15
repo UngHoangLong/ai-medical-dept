@@ -7,10 +7,11 @@ import modal
 APP_NAME = "ai-medical-dept-voxtell-s3-direct"
 REPO_URL = "https://github.com/UngHoangLong/ai-medical-dept.git"
 REPO_BRANCH = "chonjohn/segmentation"
-REBUILD_MARKER = "S3_DIRECT_CLEAN_REBUILD_20260615_01"
 
 # Load every required runtime/build variable from the local .env at deploy time.
-# Do NOT put VOXTELL_MODAL_BASE_URL in .env for this app.
+# This loads the project .env into Modal. The web() function below forces
+# VOXTELL_BACKEND_MODE=s3_direct inside Modal and removes VOXTELL_MODAL_BASE_URL
+# so the GPU Modal app never proxies back to another Modal app.
 PROJECT_SECRET = modal.Secret.from_dotenv(__file__)
 
 app = modal.App(APP_NAME)
@@ -35,8 +36,6 @@ image = (
         "libxrender1",
     )
     .run_commands(
-        f"echo {REBUILD_MARKER}",
-
         # Miniconda
         "wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh",
         "bash /tmp/miniconda.sh -b -p /opt/conda",
@@ -144,7 +143,8 @@ def wait_for_port(port: int, timeout: int = 180) -> None:
 @modal.concurrent(max_inputs=20)
 @modal.web_server(8000, startup_timeout=900)
 def web():
-    # Hard guard: this app must never proxy to old Modal.
+    # Modal GPU app must run S3-direct mode and must never proxy to another Modal app.
+    os.environ["VOXTELL_BACKEND_MODE"] = "s3_direct"
     os.environ.pop("VOXTELL_MODAL_BASE_URL", None)
 
     nginx_conf = r"""
@@ -200,6 +200,7 @@ http {
     subprocess.run("nginx -t", shell=True, check=True)
 
     print("APP_NAME =", APP_NAME)
+    print("RUNTIME VOXTELL_BACKEND_MODE =", os.getenv("VOXTELL_BACKEND_MODE"))
     print("RUNTIME S3_BUCKET_NAME =", os.getenv("S3_BUCKET_NAME"))
     print("RUNTIME AWS_REGION =", os.getenv("AWS_REGION"))
     print("RUNTIME MODAL_PIPELINE_URL configured =", bool(os.getenv("MODAL_PIPELINE_URL")))

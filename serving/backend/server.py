@@ -1,12 +1,13 @@
 """
 FastAPI backend for AI Medical Department.
 
-Production responsibilities:
-- Mount AI Medical API routes under /api/v1.
-- Initialize MedicalPipeline lifecycle.
-- Load VoxTell predictor in this backend.
-- VoxTell CT Viewer endpoints are mounted through routes/voxtell.py and run directly:
-  S3 DICOM zip -> dcm2niix -> NIfTI -> VoxTell segmentation.
+Modes:
+- proxy (default): local/main backend does not load VoxTell. It proxies
+  /api/v1/voxtell/* to VOXTELL_MODAL_BASE_URL.
+- s3_direct: Modal GPU backend loads VoxTell, downloads DICOM zip from S3,
+  converts with dcm2niix, and runs VoxTell segmentation directly.
+
+Set VOXTELL_BACKEND_MODE=s3_direct only inside the Modal GPU app.
 """
 
 import logging
@@ -20,17 +21,25 @@ PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "../.."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-import torch
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+load_dotenv()
+
 from serving.backend.pipeline import MedicalPipeline
 from serving.backend.routes import router
-from voxtell.inference.predictor import VoxTellPredictor
 
-load_dotenv()
+
+def _voxtell_mode() -> str:
+    mode = os.getenv("VOXTELL_BACKEND_MODE", "proxy").strip().lower()
+    return "s3_direct" if mode in {"s3_direct", "direct", "modal_s3_direct"} else "proxy"
+
+
+def _is_s3_direct() -> bool:
+    return _voxtell_mode() == "s3_direct"
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,25 +69,34 @@ DEFAULT_VOXTELL_MODEL_DIR = os.path.abspath(
     os.path.join(PROJECT_ROOT, "models", "voxtell_v1.1")
 )
 VOXTELL_MODEL_DIR = os.getenv("VOXTELL_MODEL_DIR", DEFAULT_VOXTELL_MODEL_DIR)
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @app.on_event("startup")
 async def startup() -> None:
-    """Initialize the main medical pipeline and load VoxTell predictor once."""
+    """Initialize MedicalPipeline and conditionally load VoxTell on Modal GPU."""
     app.state.pipeline = MedicalPipeline()
     await app.state.pipeline.connect()
     logger.info("MedicalPipeline connected.")
 
     app.state.voxtell_predictor = None
+    mode = _voxtell_mode()
+    logger.info("VoxTell backend mode: %s", mode)
+
+    if not _is_s3_direct():
+        logger.info("VoxTell is not loaded locally; /voxtell routes proxy to VOXTELL_MODAL_BASE_URL.")
+        return
+
     if os.getenv("DISABLE_VOXTELL", "0") == "1":
         logger.warning("VoxTell loading disabled by DISABLE_VOXTELL=1.")
         return
 
-    logger.info("Loading VoxTell model from %s on %s...", VOXTELL_MODEL_DIR, DEVICE)
     try:
-        predictor = VoxTellPredictor(model_dir=VOXTELL_MODEL_DIR, device=DEVICE)
-        # Save VRAM during prediction.
+        import torch
+        from voxtell.inference.predictor import VoxTellPredictor
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info("Loading VoxTell model from %s on %s...", VOXTELL_MODEL_DIR, device)
+        predictor = VoxTellPredictor(model_dir=VOXTELL_MODEL_DIR, device=device)
         predictor.perform_everything_on_device = False
         app.state.voxtell_predictor = predictor
         logger.info("VoxTell model loaded successfully.")
@@ -97,11 +115,20 @@ async def shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    predictor = getattr(app.state, "voxtell_predictor", None)
+    if _is_s3_direct():
+        predictor = getattr(app.state, "voxtell_predictor", None)
+        return {
+            "status": "ok",
+            "voxtell": "loaded" if predictor is not None else "not_loaded",
+            "voxtell_mode": "s3_direct",
+        }
+
+    voxtell_modal_base_url = os.getenv("VOXTELL_MODAL_BASE_URL", "").strip()
     return {
         "status": "ok",
-        "voxtell": "loaded" if predictor is not None else "not_loaded",
-        "voxtell_mode": "s3_direct",
+        "voxtell": "modal_proxy",
+        "voxtell_mode": "proxy",
+        "voxtell_modal": "configured" if voxtell_modal_base_url else "missing_env",
     }
 
 

@@ -21,11 +21,7 @@ export default function ChatPanel({ result, reportId, cacheKey, status }: Props)
   const [agentStatus, setAgentStatus] = useState<string>('') // Thêm state để hiển thị tiến trình (status node)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const activeReportId =
-    reportId ??
-    sessionStorage.getItem('medai_active_report_id') ??
-    result?.report_id ??
-    'unknown_report_id'
+  const activeReportId = reportId ?? 'unknown_report_id'
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })

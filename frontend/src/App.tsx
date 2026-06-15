@@ -42,13 +42,9 @@ export default function App() {
       const nextActiveId = active && restored.some(p => patientId(p.pid, p.series_uid) === active) ? active : fallback
       setActiveId(nextActiveId)
 
-      const savedReportId = loadActiveReportId()
       const restoredReportId = restored.find(p => patientId(p.pid, p.series_uid) === nextActiveId)?.result?.report_id ?? null
-      const finalReportId = savedReportId ?? restoredReportId
-      if (finalReportId) {
-        setReportId(finalReportId)
-        saveActiveReportId(finalReportId)
-      }
+      setReportId(restoredReportId)
+      saveActiveReportId(restoredReportId)
 
       setStatus('done')
     }

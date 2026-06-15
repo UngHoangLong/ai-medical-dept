@@ -12,6 +12,11 @@ venv/
 .env
 .env.*
 !.env.example
+!frontend/.env.production
+
+# Plain-text credential dumps (any filename) — never commit
+env.txt
+*.env.txt
 
 # Data — never commit raw data
 data/raw/
@@ -20,6 +25,9 @@ data/processed/
 *.nii
 *.nii.gz
 *.dcm
+
+data/
+Notebooks/
 
 # Model weights & checkpoints
 checkpoints/
@@ -37,10 +45,14 @@ lora_weights/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
+# Test fixtures (large sample data)
+tests/fixtures/
+
 # IDE
 .vscode/
 .idea/
 *.swp
+.docs/
 
 # OS
 .DS_Store

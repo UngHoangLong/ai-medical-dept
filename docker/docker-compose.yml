@@ -1,23 +1,15 @@
-version: "3.9"
-
 services:
-  serve:
-    image: ai-medical-dept:serve
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    image: ai-medical-dept-backend:latest
     ports:
       - "${API_PORT:-8000}:8000"
-    volumes:
-      - ${CHECKPOINT_DIR}:/workspace/checkpoints:ro
-      - ${FAISS_INDEX_PATH}:/workspace/faiss:ro
-      - hf_cache:/workspace/.cache/huggingface
-    env_file: .env
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    env_file:
+      - ../.env
     restart: unless-stopped
 
-volumes:
-  hf_cache:
+# cd ~/ai-medical-dept
+# git pull
+# docker compose -f docker/docker-compose.yml up -d --build

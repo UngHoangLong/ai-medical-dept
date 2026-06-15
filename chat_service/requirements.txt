@@ -10,3 +10,4 @@ psycopg[binary,pool]
 langgraph-checkpoint-postgres
 deepagents
 langchain-openai
+langchain_mcp_adapters

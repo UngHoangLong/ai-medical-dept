@@ -1,4 +1,7 @@
+import axios from 'axios'
 import type { AnalyzeResponse } from '../types/api'
+
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? ''
 
 export interface PatientEntry {
   pid: string
@@ -33,4 +36,17 @@ export function loadActiveId(): string | null {
 export function saveActiveId(id: string | null) {
   if (id) sessionStorage.setItem(ACTIVE_KEY, id)
   else sessionStorage.removeItem(ACTIVE_KEY)
+}
+
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const formData = new FormData()
+  formData.append('file', audioBlob, 'audio.wav')
+
+  try {
+    const response = await axios.post(`${BACKEND}/api/v1/stt`, formData)
+    return response.data.text || ''
+  } catch (error) {
+    console.error('Failed to transcribe audio:', error)
+    return ''
+  }
 }

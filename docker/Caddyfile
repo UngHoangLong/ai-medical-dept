@@ -1,0 +1,9 @@
+20-2-65-102.nip.io {
+    # Route chat_service APIs to port 8001
+    reverse_proxy /api/v1/chat* localhost:8001
+    reverse_proxy /api/v1/history* localhost:8001
+    reverse_proxy /api/v1/threads* localhost:8001
+
+    # Route everything else to backend port 8000
+    reverse_proxy localhost:8000
+}

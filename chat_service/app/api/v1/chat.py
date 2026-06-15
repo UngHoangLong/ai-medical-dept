@@ -184,7 +184,7 @@ async def get_all_threads(request: Request):
                 # 4. Sắp xếp giảm dần (mới nhất lên đầu)
                 query = """
                     SELECT thread_id
-                    FROM checkpoints
+                    FROM ai_demo.checkpoints
                     WHERE checkpoint_ns = ''
                     GROUP BY thread_id
                 """

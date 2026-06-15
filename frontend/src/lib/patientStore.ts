@@ -43,11 +43,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   formData.append('file', audioBlob, 'audio.wav')
 
   try {
-    const response = await axios.post(`${BACKEND}/api/v1/stt`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
+    const response = await axios.post(`${BACKEND}/api/v1/stt`, formData)
     return response.data.text || ''
   } catch (error) {
     console.error('Failed to transcribe audio:', error)

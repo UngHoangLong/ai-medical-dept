@@ -52,6 +52,7 @@ tests/fixtures/
 .vscode/
 .idea/
 *.swp
+.docs/
 
 # OS
 .DS_Store

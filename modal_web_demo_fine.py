@@ -1,3 +1,5 @@
+import os
+
 import modal
 import subprocess
 import time
@@ -34,7 +36,13 @@ image = (
         "rm /tmp/miniconda.sh",
 
         # Clone repo
-        "git clone --depth=1 -b chonjohn/segmentation https://github.com/UngHoangLong/ai-medical-dept.git /app && cd /app && git rev-parse HEAD",
+        r"""git clone --depth=1 -b chonjohn/segmentation https://github.com/UngHoangLong/ai-medical-dept.git /app && cd /app && \
+        echo '=== MODAL GIT COMMIT ===' && git rev-parse HEAD && \
+        echo '=== FIND S3 / DCM2NIIX / VOXTELL CODE ===' && \
+        grep -RIn --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist \
+        'download_file\|get_object\|subprocess.run\|dcm2niix\|dicom-raw\|/voxtell/volume' \
+        serving . || true
+        """,
 
         # Accept Anaconda Terms of Service
         "bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main'",
@@ -231,6 +239,9 @@ http {
         f.write(nginx_conf)
 
     subprocess.run("nginx -t", shell=True, check=True)
+
+    print("RUNTIME VOXTELL_MODAL_BASE_URL =", os.getenv("VOXTELL_MODAL_BASE_URL"))
+    print("RUNTIME S3_BUCKET_NAME =", os.getenv("S3_BUCKET_NAME"))
 
     subprocess.Popen(
         "cd /app && source /opt/conda/etc/profile.d/conda.sh && conda activate voxtell && ./run.sh",

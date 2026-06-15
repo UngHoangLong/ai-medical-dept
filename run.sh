@@ -10,6 +10,8 @@ BACKEND_PORT="${BACKEND_PORT:-1711}"
 FRONTEND_PORT="${FRONTEND_PORT:-2811}"
 BACKEND_CONDA_ENV="${BACKEND_CONDA_ENV:-${CONDA_DEFAULT_ENV:-ai-chatbot-pro}}"
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
+# Browser-facing API URL. In Modal this must be /api, not localhost.
+PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-$BACKEND_URL}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
 
 check_prerequisites() {
@@ -20,7 +22,7 @@ check_prerequisites() {
             [ -f "$p/conda" ] && export PATH="$p:$PATH" && break
         done
         if ! command -v conda &>/dev/null; then
-            echo -e "${RED}Error:${RESET} conda not found. Run this script in Anaconda Prompt/Git Bash after conda init." >&2
+            echo -e "${RED}Error:${RESET} conda not found." >&2
             errors=$((errors + 1))
         fi
     fi
@@ -28,8 +30,6 @@ check_prerequisites() {
     if command -v conda &>/dev/null; then
         if ! conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$BACKEND_CONDA_ENV"; then
             echo -e "${RED}Error:${RESET} conda environment '$BACKEND_CONDA_ENV' not found." >&2
-            echo "  Current default is BACKEND_CONDA_ENV=${BACKEND_CONDA_ENV}" >&2
-            echo "  To use another env: BACKEND_CONDA_ENV=voxtell ./run.sh" >&2
             errors=$((errors + 1))
         fi
     fi
@@ -61,14 +61,12 @@ check_prerequisites() {
 
     if [ ! -d "$SCRIPT_DIR/models/voxtell_v1.1" ]; then
         echo -e "${RED}Error:${RESET} VoxTell model not found at models/voxtell_v1.1/." >&2
-        echo "  Put/download the VoxTell model into: $SCRIPT_DIR/models/voxtell_v1.1" >&2
         errors=$((errors + 1))
     fi
 
     if command -v conda &>/dev/null && conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$BACKEND_CONDA_ENV"; then
         if ! conda run -n "$BACKEND_CONDA_ENV" dcm2niix -h >/dev/null 2>&1; then
             echo -e "${RED}Error:${RESET} dcm2niix not found inside env '$BACKEND_CONDA_ENV'." >&2
-            echo "  Install: conda install -n $BACKEND_CONDA_ENV -c conda-forge dcm2niix -y" >&2
             errors=$((errors + 1))
         fi
     fi
@@ -105,8 +103,8 @@ trap cleanup EXIT INT TERM
 
 check_prerequisites
 
-upsert_frontend_env "VITE_BACKEND_URL" "$BACKEND_URL"
-upsert_frontend_env "VITE_VOXTELL_API_BASE_URL" "$BACKEND_URL"
+upsert_frontend_env "VITE_BACKEND_URL" "$PUBLIC_BACKEND_URL"
+upsert_frontend_env "VITE_VOXTELL_API_BASE_URL" "$PUBLIC_BACKEND_URL"
 
 echo ""
 echo -e "${BOLD}AI Medical Department + VoxTell CT Viewer${RESET}"
@@ -114,6 +112,7 @@ echo -e "───────────────────────�
 echo -e "  Backend env: ${GREEN}${BACKEND_CONDA_ENV}${RESET}"
 echo -e "  Backend URL: ${GREEN}${BACKEND_URL}${RESET}"
 echo -e "  Frontend URL: ${GREEN}${FRONTEND_URL}${RESET}"
+echo -e "  Public API URL: ${GREEN}${PUBLIC_BACKEND_URL}${RESET}"
 echo ""
 
 echo -e "${CYAN}Starting backend...${RESET}"

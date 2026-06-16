@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, MessageSquare, Loader2 } from 'lucide-react'
+import { Send, Bot, User, MessageSquare, Loader2, Mic } from 'lucide-react'
 import type { AnalyzeResponse, ChatMessage } from '../types/api'
 import type { AnalysisStatus } from '../App'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { transcribeAudio } from '../lib/patientStore'
 
 const CHAT_BACKEND = import.meta.env.VITE_CHAT_SERVICE_URL || 'http://localhost:8000'
 
@@ -22,6 +23,74 @@ export default function ChatPanel({ result, reportId, cacheKey, status }: Props)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const activeReportId = reportId ?? 'unknown_report_id'
+
+  // Speech-to-Text State & Refs
+  const [isRecording, setIsRecording] = useState(false)
+  const [sttLoading, setSttLoading] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+
+  // Clean up recording resources on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+      }
+    }
+  }, [])
+
+  async function toggleRecording() {
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+      setIsRecording(false)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        streamRef.current = stream
+        audioChunksRef.current = []
+
+        const mediaRecorder = new MediaRecorder(stream)
+        mediaRecorderRef.current = mediaRecorder
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data)
+          }
+        }
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
+          
+          // Release microphone track
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+          }
+
+          setSttLoading(true)
+          try {
+            const responseText = await transcribeAudio(audioBlob)
+            if (responseText) {
+              setInput(prev => (prev ? `${prev} ${responseText}` : responseText))
+            }
+          } catch (err) {
+            console.error('Failed to transcribe audio:', err)
+          } finally {
+            setSttLoading(false)
+          }
+        }
+
+        mediaRecorder.start()
+        setIsRecording(true)
+      } catch (err) {
+        console.error('Failed to access microphone:', err)
+        alert('Could not access microphone. Please check permissions.')
+      }
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -293,20 +362,39 @@ export default function ChatPanel({ result, reportId, cacheKey, status }: Props)
       {/* Input */}
       <div className="p-3 border-t border-white/5">
         <div className="flex gap-2 items-end">
+          <button
+            onClick={toggleRecording}
+            disabled={isDisabled || sttLoading}
+            title={isRecording ? 'Stop recording' : 'Record voice note'}
+            type="button"
+            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 ${
+              isRecording 
+                ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
+                : sttLoading 
+                ? 'bg-gray-800 text-blue-400' 
+                : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-white/10'
+            }`}
+          >
+            {sttLoading ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Mic size={13} />
+            )}
+          </button>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
             }}
-            disabled={isDisabled || loading}
-            placeholder={isDisabled ? 'Run analysis first...' : 'Ask about this scan...'}
+            disabled={isDisabled || loading || isRecording}
+            placeholder={isDisabled ? 'Run analysis first...' : isRecording ? 'Recording audio...' : 'Ask about this scan...'}
             rows={1}
             className="flex-1 text-xs bg-gray-800 border border-white/10 rounded-xl px-3 py-2 resize-none text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-30 transition-all"
           />
           <button
             onClick={sendMessage}
-            disabled={!input.trim() || loading || isDisabled}
+            disabled={!input.trim() || loading || isDisabled || isRecording || sttLoading}
             className="w-8 h-8 rounded-xl bg-blue-500 hover:bg-blue-400 disabled:bg-white/5 disabled:text-gray-600 text-white flex items-center justify-center transition-all shrink-0"
           >
             <Send size={13} />

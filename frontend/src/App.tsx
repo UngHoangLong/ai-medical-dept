@@ -253,7 +253,11 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden gap-3 p-3">
 
         {/* Left — CT Viewer */}
-        <CTViewer status={status} />
+        <CTViewer
+          status={status}
+          pid={active?.pid}
+          seriesUid={active?.series_uid}
+        />
 
         {/* Center — Agent Results */}
         <AgentResults

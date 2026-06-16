@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+langgraph
+langchain
+langchain[deepseek]
+pydantic
+dotenv
+pydantic-settings
+psycopg[binary,pool]
+langgraph-checkpoint-postgres
+deepagents
+langchain-openai
+langchain_mcp_adapters

@@ -40,11 +40,19 @@ class PgStorage:
         """Load report_content đã lưu cho 1 (pid, series_uid). None nếu chưa có."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT report_content FROM {SCHEMA}.consultation_reports "
+                f"SELECT report_id, report_content FROM {SCHEMA}.consultation_reports "
                 "WHERE patient_id = $1 AND series_uid = $2",
                 pid, series_uid,
             )
-        return json.loads(row["report_content"]) if row else None
+        if not row:
+            return None
+
+        report = json.loads(row["report_content"]) or {}
+        report_id = str(row.get("report_id"))  # Lấy report_id từ DB để trả về cùng report_content (phục vụ thread_id cho FE)
+        return {
+            **report,
+            "report_id": report_id
+        }
 
     async def list_analyses(self) -> list[dict]:
         """Liệt kê tất cả bệnh nhân đã có report, mới nhất trước."""
@@ -73,7 +81,7 @@ class PgStorage:
         ct_slices_prefix: str,
         n_slices: int,
         gender: str | None = None,
-    ) -> None:
+    ) -> str:
         """Upsert patient + clinical_data (bản ghi mới) + consultation_reports."""
         medical_history_json = json.dumps(clinical_data, ensure_ascii=False)
         result_json = json.dumps(result, ensure_ascii=False)
@@ -91,7 +99,7 @@ class PgStorage:
                 pid, medical_history_json, clinical_text,
             )
 
-            await conn.execute(
+            report_id = await conn.fetchval(
                 f"""
                 INSERT INTO {SCHEMA}.consultation_reports
                     (patient_id, record_id, series_uid, dicom_s3_key,
@@ -104,7 +112,9 @@ class PgStorage:
                     n_slices         = EXCLUDED.n_slices,
                     report_content   = EXCLUDED.report_content,
                     updated_at       = now()
+                RETURNING report_id
                 """,
                 pid, record_id, series_uid, dicom_s3_key,
                 ct_slices_prefix, n_slices, result_json,
             )
+            return str(report_id)

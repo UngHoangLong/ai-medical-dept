@@ -31,6 +31,7 @@ class VerificationResult(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
+    report_id: str | None = None
     radiology: RadiologyResult
     cardiology: CardiologyResult
     oncology: OncologyResult

@@ -66,3 +66,6 @@ runs/
 
 # Docker
 docker-compose.override.yml
+
+
+.venv_mcp_server

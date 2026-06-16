@@ -696,6 +696,10 @@ function Viewer({
     };
 
     setNv(niivue);
+
+    return () => {
+      niivue.cleanup();
+    };
   }, []);
 
   useEffect(() => {

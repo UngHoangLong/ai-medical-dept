@@ -9,7 +9,7 @@ def fetch_single_drug_record(drug_name):
     """Hàm lõi gọi API cho 1 loại thuốc. Trả về tuple: (drug_name, record, error)"""
     url = f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"+openfda.brand_name:"{drug_name}"&limit=1'
     try:
-        response = requests.get(url).json()
+        response = requests.get(url, timeout=10).json()
         if 'error' in response:
             return drug_name, None, f"No FDA drug label data found for: {drug_name}"
         return drug_name, response['results'][0], None
@@ -74,8 +74,6 @@ def get_fda_drug_interactions(drug_names: list) -> str:
             if field in record and record[field]:
                 text_content = record[field][0]
                 extracted_sections.append(f"[{field.upper()} SECTION]:\n{text_content}")
-                if field == 'drug_interactions':
-                    break # Dừng quét nếu đã trúng trường chuẩn
                     
         if extracted_sections:
             combined_report.append("\n\n".join(extracted_sections) + "\n")

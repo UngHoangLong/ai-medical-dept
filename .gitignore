@@ -14,6 +14,10 @@ venv/
 !.env.example
 !frontend/.env.production
 
+# Plain-text credential dumps (any filename) — never commit
+env.txt
+*.env.txt
+
 # Data — never commit raw data
 data/raw/
 data/processed/
@@ -21,6 +25,9 @@ data/processed/
 *.nii
 *.nii.gz
 *.dcm
+
+data/
+Notebooks/
 
 # Model weights & checkpoints
 checkpoints/
@@ -45,6 +52,7 @@ tests/fixtures/
 .vscode/
 .idea/
 *.swp
+.docs/
 
 # OS
 .DS_Store

@@ -434,7 +434,7 @@ export default function AgentResults({ result, status, errorMsg }: Props) {
                       {groups.map((g, gi) => (
                         <div key={gi}>
                           {g.label && (
-                            <p className="text-xs font-semibold text-gray-400 mb-1">
+                            <p className="text-base font-bold text-pink-400 mb-1.5">
                               {g.label}
                             </p>
                           )}

@@ -247,7 +247,7 @@ class MedicalPipeline:
         if gender in (None, "", "None"):
             gender = None
 
-        await self.pg.save_analysis(
+        report_id = await self.pg.save_analysis(
             pid, series_uid, clinical_data, clinical_text, result,
             dicom_s3_key=dicom_s3_key,
             ct_slices_prefix=f"ct-slices/{cache_key}/",
@@ -257,4 +257,7 @@ class MedicalPipeline:
 
         logger.info("=== Pipeline done  total=%.1fs ===", time.perf_counter() - t_total)
 
-        return result
+        return {
+            **result,
+            "report_id": report_id
+        }

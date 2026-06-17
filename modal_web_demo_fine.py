@@ -137,7 +137,7 @@ def wait_for_port(port: int, timeout: int = 180) -> None:
     gpu="A10G",
     timeout=60 * 60,
     max_containers=1,
-    scaledown_window=20 * 60,
+    scaledown_window=5 * 60,
     secrets=[PROJECT_SECRET],
 )
 @modal.concurrent(max_inputs=20)

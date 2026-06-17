@@ -962,7 +962,7 @@ function Viewer({
                   onChange={(e) =>
                     handleWindowChange(parseFloat(e.target.value), winMax)
                   }
-                  className="windowing-thumb pointer-events-none absolute h-1.5 w-full cursor-pointer appearance-none bg-transparent"
+                  className="windowing-thumb absolute h-1.5 w-full cursor-pointer appearance-none bg-transparent"
                   style={{ zIndex: 2 }}
                   title={`Window min: ${Math.round(winMin)}`}
                 />
@@ -975,7 +975,7 @@ function Viewer({
                   onChange={(e) =>
                     handleWindowChange(winMin, parseFloat(e.target.value))
                   }
-                  className="windowing-thumb pointer-events-none absolute h-1.5 w-full cursor-pointer appearance-none bg-transparent"
+                  className="windowing-thumb absolute h-1.5 w-full cursor-pointer appearance-none bg-transparent"
                   style={{ zIndex: 3 }}
                   title={`Window max: ${Math.round(winMax)}`}
                 />

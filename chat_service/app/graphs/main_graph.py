@@ -13,13 +13,24 @@ from ..utils import fetch_medical_context
 # ── i18n: Prompt templates cho 3 ngôn ngữ ──────────────────────────────
 PROMPTS = {
     "vi": {
-        "rewrite": "Dựa vào lịch sử trò chuyện, hãy viết lại câu hỏi cuối cùng của người dùng thành một câu hỏi đứng độc lập, rõ nghĩa. Chỉ trả về câu hỏi, không giải thích gì thêm.",
-        "casual": "Bạn là một trợ lý ảo y tế thân thiện tên là Bác Sĩ AI. Đối với các câu hỏi chào hỏi hoặc giao tiếp thông thường, hãy trả lời lịch sự, thân thiện và ngắn gọn. Tuyệt đối không tự bịa ra kiến thức y khoa.",
-        "medical_agent": "Bạn là một chuyên gia y tế. Hãy sử dụng các công cụ được cung cấp để tra cứu thông tin y khoa, tương tác thuốc, và hồ sơ an toàn trước khi trả lời bệnh nhân.",
+        "rewrite": "Dựa vào lịch sử trò chuyện, viết lại câu hỏi cuối của người dùng thành câu hỏi độc lập, rõ nghĩa. Chỉ trả về câu hỏi, không giải thích.",
+        "casual": "Bạn là trợ lý y tế AI. Trả lời ngắn gọn, tối đa 2-3 câu. Không bịa kiến thức y khoa.",
+        "medical_agent": (
+            "Bạn là chuyên gia y tế hỗ trợ bác sĩ. Quy tắc trả lời:\n"
+            "- Ngắn gọn, súc tích — bác sĩ không cần giải thích dài dòng\n"
+            "- Ưu tiên bullet points cho thông tin lâm sàng\n"
+            "- Nêu thẳng kết luận, rủi ro, hoặc hành động cần làm\n"
+            "- Dùng công cụ để tra cứu trước khi trả lời nếu cần"
+        ),
         "guardrail": "Check if the following user query is safe to answer without violating any content policies. You MUST respond in valid JSON format matching this schema: {\"is_safe\": boolean}.\n\n",
-        "unsafe": "Xin lỗi, tôi không thể trả lời câu hỏi này vì nó vi phạm chính sách hoặc không an toàn.",
-        "classify": "Bạn là chuyên gia phân loại. Hãy xác định xem câu hỏi của người dùng có cần tra cứu kiến thức y khoa/sức khỏe hay không. BẮT BUỘC phải trả về định dạng JSON với cấu trúc chính xác như sau: {\"is_medical\": boolean}.",
-        "medical_with_context": "Dựa vào thông tin bệnh nhân dưới đây, hãy trả lời câu hỏi chuyên môn.\n\n{context}\n\n[CÂU HỎI MỚI]: {query}",
+        "unsafe": "Câu hỏi này vi phạm chính sách nội dung, tôi không thể trả lời.",
+        "classify": "Phân loại câu hỏi. Trả về JSON: {\"is_medical\": boolean}. True nếu liên quan sức khỏe/bệnh lý/thuốc. False nếu là giao tiếp thông thường.",
+        "medical_with_context": (
+            "Thông tin bệnh nhân:\n{context}\n\n"
+            "Câu hỏi: {query}\n\n"
+            "Trả lời ngắn gọn, tập trung vào trọng tâm lâm sàng. "
+            "Dùng bullet points. Bỏ qua phần mở đầu, đi thẳng vào nội dung."
+        ),
         "fmt_findings": "### 1. KẾT QUẢ KHÁM (FINDINGS)",
         "fmt_impression": "\n### 2. CHẨN ĐOÁN/KẾT LUẬN (IMPRESSION)",
         "fmt_radiology": "\n### 3. CHI TIẾT HÌNH ẢNH (RADIOLOGY)",
@@ -36,13 +47,23 @@ PROMPTS = {
         "no_report": "Không có dữ liệu báo cáo.",
     },
     "en": {
-        "rewrite": "Based on the conversation history, rewrite the user's last question as a standalone, self-contained question. Return only the question, no explanation.",
-        "casual": "You are a friendly medical AI assistant named Dr. AI. For greetings or casual conversation, respond politely, warmly and concisely. Never fabricate medical knowledge.",
-        "medical_agent": "You are a medical expert. Use the provided tools to look up medical information, drug interactions, and safety profiles before answering the patient.",
+        "rewrite": "Rewrite the user's last question as a standalone question using conversation history. Return only the question.",
+        "casual": "You are a medical AI assistant. Reply concisely in 2-3 sentences max. Never fabricate medical knowledge.",
+        "medical_agent": (
+            "You are a clinical decision support AI for physicians. Rules:\n"
+            "- Be concise — doctors need fast, actionable answers\n"
+            "- Use bullet points for clinical data\n"
+            "- Lead with conclusions, risks, or recommended actions\n"
+            "- Use tools to look up information when needed"
+        ),
         "guardrail": "Check if the following user query is safe to answer without violating any content policies. You MUST respond in valid JSON format matching this schema: {\"is_safe\": boolean}.\n\n",
-        "unsafe": "Sorry, I cannot answer this question as it violates content policies or is unsafe.",
-        "classify": "You are a classification expert. Determine whether the user's question requires medical/health knowledge lookup. You MUST respond in valid JSON format: {\"is_medical\": boolean}.",
-        "medical_with_context": "Based on the patient information below, answer the clinical question.\n\n{context}\n\n[NEW QUESTION]: {query}",
+        "unsafe": "This question violates content policies and cannot be answered.",
+        "classify": "Classify the query. Return JSON: {\"is_medical\": boolean}. True if health/disease/drug related. False if casual.",
+        "medical_with_context": (
+            "Patient data:\n{context}\n\n"
+            "Question: {query}\n\n"
+            "Answer concisely and clinically. Use bullet points. Skip preamble — go straight to the point."
+        ),
         "fmt_findings": "### 1. EXAMINATION RESULTS (FINDINGS)",
         "fmt_impression": "\n### 2. DIAGNOSIS / CONCLUSION (IMPRESSION)",
         "fmt_radiology": "\n### 3. IMAGING DETAILS (RADIOLOGY)",
@@ -59,13 +80,23 @@ PROMPTS = {
         "no_report": "No report data available.",
     },
     "ja": {
-        "rewrite": "会話履歴に基づいて、ユーザーの最後の質問を独立した明確な質問に書き直してください。質問のみを返し、説明は不要です。",
-        "casual": "あなたはDr. AIという名前の親切な医療AIアシスタントです。挨拶や日常会話には、丁寧で親しみやすく簡潔に答えてください。医学知識を捏造しないでください。",
-        "medical_agent": "あなたは医療の専門家です。患者に回答する前に、提供されたツールを使用して医学情報、薬物相互作用、安全性プロファイルを調べてください。",
+        "rewrite": "会話履歴を使い、最後の質問を独立した質問に書き直す。質問のみ返す。",
+        "casual": "医療AIアシスタントです。2〜3文で簡潔に答えてください。医学知識を捏造しないでください。",
+        "medical_agent": (
+            "あなたは医師向け臨床支援AIです。ルール:\n"
+            "- 簡潔に — 医師は迅速で実用的な回答を必要としています\n"
+            "- 臨床データはbullet pointsで\n"
+            "- 結論・リスク・推奨アクションを先に述べる\n"
+            "- 必要に応じてツールを使用する"
+        ),
         "guardrail": "Check if the following user query is safe to answer without violating any content policies. You MUST respond in valid JSON format matching this schema: {\"is_safe\": boolean}.\n\n",
-        "unsafe": "申し訳ございませんが、この質問はコンテンツポリシーに違反するため、お答えすることができません。",
-        "classify": "あなたは分類の専門家です。ユーザーの質問が医学・健康に関する知識の検索を必要とするかどうかを判断してください。必ずJSON形式で回答してください: {\"is_medical\": boolean}。",
-        "medical_with_context": "以下の患者情報に基づいて、臨床的な質問にお答えください。\n\n{context}\n\n[新しい質問]: {query}",
+        "unsafe": "このご質問はコンテンツポリシーに違反するため、お答えできません。",
+        "classify": "質問を分類する。JSON形式で返す: {\"is_medical\": boolean}。",
+        "medical_with_context": (
+            "患者データ:\n{context}\n\n"
+            "質問: {query}\n\n"
+            "簡潔に臨床的に答えてください。箇条書きを使用し、前置きなしに直接回答してください。"
+        ),
         "fmt_findings": "### 1. 検査結果 (FINDINGS)",
         "fmt_impression": "\n### 2. 診断・結論 (IMPRESSION)",
         "fmt_radiology": "\n### 3. 画像詳細 (RADIOLOGY)",

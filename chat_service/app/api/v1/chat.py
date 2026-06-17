@@ -15,7 +15,6 @@ class ChatContext(BaseModel):
 @router.post("/chat")
 async def chat(request: Request, context: ChatContext):
     
-    # 1. Truyền report_id vào State để node init_context có thể fetch DB
     input_state = {
         "messages": [("user", context.query)],
         "report_id": context.report_id
@@ -23,17 +22,24 @@ async def chat(request: Request, context: ChatContext):
     
     main_graph = request.state.main_graph
     db_pool = request.state.db_pool
-    
     config = {"configurable": {"thread_id": context.report_id, "db_pool": db_pool}}
     
     async def event_generator():
         try:
+            # =========================================================
+            # TRICK: Gửi 1KB "dữ liệu giả" ngay lập tức để ép Proxy mở van.
+            # Dấu ":" ở đầu báo hiệu đây là SSE Comment, FE sẽ lờ nó đi.
+            # =========================================================
+            dummy_padding = ":" + " " * 8096 + "\n\n"
+            yield dummy_padding
+
+            # Bắt đầu chạy LangGraph
             async for chunk in main_graph.graph.astream(
                 input_state, 
                 stream_mode=['updates', 'messages'],  
                 version="v2",
                 config=config,
-                subgraphs=True # Bắt buộc phải = True để nghe được sub-graph
+                subgraphs=True 
             ):
                 stream_mode = chunk["type"]
                 chunk_data = chunk["data"]
@@ -62,13 +68,11 @@ async def chat(request: Request, context: ChatContext):
                                     }
                                     yield f"data: {json.dumps(payload_token)}\n\n"
 
-                
                 # --- XỬ LÝ EVENT MESSAGES (TOKEN TỪ LLM) ---
                 elif stream_mode == "messages":
                     msg, metadata = chunk_data
                     
-                    # FIX Ở ĐÂY: Thêm "agent" vào mảng này
-                    valid_nodes = ["casual_chat", "medical_chat", "agent"] 
+                    valid_nodes = ["casual_chat", "medical_chat", "model"] 
                     
                     if msg.__class__.__name__ == "AIMessageChunk":
                         is_tool_call = hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0
@@ -86,7 +90,14 @@ async def chat(request: Request, context: ChatContext):
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Content-Type": "text/event-stream",
+        "Content-Encoding": "identity",
+        "Connection": "close"
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
 # @router.post("/chat-test")
@@ -184,7 +195,7 @@ async def get_all_threads(request: Request):
                 # 4. Sắp xếp giảm dần (mới nhất lên đầu)
                 query = """
                     SELECT thread_id
-                    FROM ai_demo.checkpoints
+                    FROM public.checkpoints
                     WHERE checkpoint_ns = ''
                     GROUP BY thread_id
                 """

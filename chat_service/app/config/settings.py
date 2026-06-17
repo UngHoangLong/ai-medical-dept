@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     CHAT_MODEL: str = "deepseek-v4-flash"
     LLM_TEMPERATURE_CHAT: float = 0.7
 
+    CORS_ORIGINS: str = "*"
     LLM_TIMEOUT: int = 60
     LLM_MAX_RETRIES: int = 3
 

@@ -203,3 +203,19 @@ Frontend load bệnh nhân
 → frontend hiển thị auto mask
 → bác sĩ có thể chạy manual segmentation tiếp
 ```
+
+---
+
+## 11. Lệnh chạy local:
+Mở 2 terminal
+Terminal 1:
+```txt
+cd ai-medical-dept
+uvicorn serving.backend.server:app --host 0.0.0.0 --port 8000
+```
+
+Terminal 2:
+```txt
+cd ai-medical-dept/frontend
+npm run dev
+```

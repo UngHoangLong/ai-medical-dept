@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
+from pathlib import Path
 
 try:
     from serving.backend.highlighter_client import call_llm_json

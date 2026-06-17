@@ -29,3 +29,42 @@
     display: none;
   }
 }
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 8px;
+}
+.markdown-body th {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin-top: 10px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #60A5FA; /* Màu xanh nước biển cho tiêu đề đẹp hơn */
+}
+.markdown-body hr {
+  border-color: rgba(255, 255, 255, 0.1);
+  margin: 12px 0;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 8px 10px;
+}
+.markdown-body th {
+  background-color: rgba(255, 255, 255, 0.05);
+  text-align: left;
+  font-weight: 600;
+  color: #93C5FD; /* Màu xanh nhạt cho tiêu đề bảng */
+}

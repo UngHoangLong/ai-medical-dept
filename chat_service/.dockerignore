@@ -1,0 +1,22 @@
+# Môi trường ảo của Python
+.venv
+.venv_mcp_server
+env/
+venv/
+
+# File tạm và cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# File cấu hình môi trường cục bộ (Chỉ nên truyền biến môi trường qua docker run hoặc docker-compose)
+.env
+
+# Git và IDE
+.git/
+.vscode/
+.idea/
+
+
+t.ipynb

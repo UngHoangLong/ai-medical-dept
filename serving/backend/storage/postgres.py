@@ -81,7 +81,7 @@ class PgStorage:
         ct_slices_prefix: str,
         n_slices: int,
         gender: str | None = None,
-    ) -> None:
+    ) -> str:
         """Upsert patient + clinical_data (bản ghi mới) + consultation_reports."""
         medical_history_json = json.dumps(clinical_data, ensure_ascii=False)
         result_json = json.dumps(result, ensure_ascii=False)
@@ -99,7 +99,7 @@ class PgStorage:
                 pid, medical_history_json, clinical_text,
             )
 
-            await conn.execute(
+            report_id = await conn.fetchval(
                 f"""
                 INSERT INTO {SCHEMA}.consultation_reports
                     (patient_id, record_id, series_uid, dicom_s3_key,
@@ -112,7 +112,9 @@ class PgStorage:
                     n_slices         = EXCLUDED.n_slices,
                     report_content   = EXCLUDED.report_content,
                     updated_at       = now()
+                RETURNING report_id
                 """,
                 pid, record_id, series_uid, dicom_s3_key,
                 ct_slices_prefix, n_slices, result_json,
             )
+            return str(report_id)

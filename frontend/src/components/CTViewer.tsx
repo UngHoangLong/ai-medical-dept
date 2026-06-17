@@ -28,12 +28,36 @@ interface Props {
   seriesUid?: string | null;
 }
 
+type AutoCandidateLog = {
+  rank?: number;
+  prompt: string;
+  accepted?: boolean;
+  nonzero?: number;
+  max?: number;
+  ratio?: number;
+  error?: string;
+};
+
 type Segmentation = {
   id: string;
   file: File;
   prompt: string;
   isVisible: boolean;
   color: string;
+  source: "auto" | "manual";
+  top3?: string[];
+  candidateLogs?: AutoCandidateLog[];
+};
+
+type AutoStatus = "idle" | "extracting" | "segmenting" | "done" | "error";
+
+type AutoPromptResponse = {
+  pid?: string;
+  series_uid?: string;
+  source?: string;
+  top3?: string[];
+  prompt?: string;
+  prompt_candidates?: string[];
 };
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "";
@@ -77,14 +101,36 @@ async function readError(response: Response, fallback: string) {
 
   try {
     const payload = JSON.parse(text);
-    return payload.detail || payload.message || text;
+    const detail = payload.detail || payload.message;
+    if (!detail) return text;
+    return typeof detail === "string" ? detail : JSON.stringify(detail);
   } catch {
     return text;
   }
 }
 
+function decodeHeaderValue(value: string | null) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function decodeJsonHeader<T>(value: string | null, fallback: T): T {
+  const decoded = decodeHeaderValue(value);
+  if (!decoded) return fallback;
+  try {
+    return JSON.parse(decoded) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function CTViewer({ status, pid, seriesUid }: Props) {
   const downloadMenuRef = useRef<HTMLDivElement>(null);
+  const autoRunKeyRef = useRef<string | null>(null);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [viewerKey, setViewerKey] = useState("empty");
@@ -97,6 +143,13 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [autoStatus, setAutoStatus] = useState<AutoStatus>("idle");
+  const [autoTop3, setAutoTop3] = useState<string[]>([]);
+  const [autoPrompt, setAutoPrompt] = useState("");
+  const [autoSource, setAutoSource] = useState("");
+  const [autoCandidateLogs, setAutoCandidateLogs] = useState<AutoCandidateLog[]>([]);
+  const [autoError, setAutoError] = useState<string | null>(null);
 
   const hasActivePatient = Boolean(pid && seriesUid);
   const activeViewLabel = getSliceTypeLabel(sliceType);
@@ -155,6 +208,13 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
     setSegmentations([]);
     setShowDownloadMenu(false);
     setError(null);
+    setAutoStatus("idle");
+    setAutoTop3([]);
+    setAutoPrompt("");
+    setAutoSource("");
+    setAutoCandidateLogs([]);
+    setAutoError(null);
+    autoRunKeyRef.current = null;
     setSliceType(SLICE_TYPE.MULTIPLANAR);
     setIsFullscreen(false);
 
@@ -210,6 +270,102 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
     return () => controller.abort();
   }, [pid, seriesUid]);
 
+  useEffect(() => {
+    if (!pid || !seriesUid || !imageFile || isLoadingVolume) return;
+
+    const runKey = `${pid}/${seriesUid}`;
+    if (autoRunKeyRef.current === runKey) return;
+    autoRunKeyRef.current = runKey;
+
+    const controller = new AbortController();
+
+    async function runAutoSegmentation() {
+      try {
+        setAutoStatus("extracting");
+        setAutoError(null);
+        setAutoTop3([]);
+        setAutoPrompt("");
+        setAutoSource("");
+        setAutoCandidateLogs([]);
+
+        const formData = new FormData();
+        formData.append("pid", pid!);
+        formData.append("series_uid", seriesUid!);
+
+        setAutoStatus("segmenting");
+
+        const response = await fetch(`${BACKEND}/api/v1/voxtell/predict-auto`, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            await readError(response, "Không chạy được candidate-based auto segmentation."),
+          );
+        }
+
+        const selectedPrompt = decodeHeaderValue(response.headers.get("x-voxtell-prompt"));
+        const source = response.headers.get("x-voxtell-source") || "llm";
+        const top3 = decodeJsonHeader<string[]>(response.headers.get("x-voxtell-top3"), []);
+        const candidateLogs = decodeJsonHeader<AutoCandidateLog[]>(
+          response.headers.get("x-voxtell-candidate-logs"),
+          [],
+        );
+
+        const promptText = selectedPrompt || "auto selected prompt";
+
+        setAutoTop3(top3);
+        setAutoPrompt(promptText);
+        setAutoSource(source);
+        setAutoCandidateLogs(candidateLogs);
+
+        const blob = await response.blob();
+        const file = new File(
+          [blob],
+          `voxtell_auto_${pid}_${seriesUid}.nii.gz`,
+          { type: "application/gzip" },
+        );
+
+        const id = `auto-${pid}-${seriesUid}-${Date.now()}`;
+
+        setSegmentations((prev) => {
+          const withoutOldAuto = prev.filter((seg) => seg.source !== "auto");
+          const color = SEGMENTATION_COLORS[withoutOldAuto.length % SEGMENTATION_COLORS.length];
+          return [
+            {
+              id,
+              file,
+              prompt: promptText,
+              isVisible: true,
+              color,
+              source: "auto",
+              top3,
+              candidateLogs,
+            },
+            ...withoutOldAuto,
+          ];
+        });
+
+        setAutoStatus("done");
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error("Error running auto VoxTell segmentation:", err);
+        setAutoStatus("error");
+        setAutoError(
+          err instanceof Error
+            ? err.message
+            : "Không chạy được auto segmentation từ report.",
+        );
+      }
+    }
+
+    runAutoSegmentation();
+
+    return () => controller.abort();
+  }, [pid, seriesUid, imageFile, isLoadingVolume]);
+
   const resetViewer = () => {
     setSegmentations([]);
     setPrompt("");
@@ -250,19 +406,22 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
         { type: "application/gzip" },
       );
 
-      const id = `${Date.now()}-${promptText.replace(/\s+/g, "_")}`;
-      const color = SEGMENTATION_COLORS[segmentations.length % SEGMENTATION_COLORS.length];
+      const id = `manual-${Date.now()}-${promptText.replace(/\s+/g, "_")}`;
 
-      setSegmentations((prev) => [
-        ...prev,
-        {
-          id,
-          file,
-          prompt: promptText,
-          isVisible: true,
-          color,
-        },
-      ]);
+      setSegmentations((prev) => {
+        const color = SEGMENTATION_COLORS[prev.length % SEGMENTATION_COLORS.length];
+        return [
+          ...prev,
+          {
+            id,
+            file,
+            prompt: promptText,
+            isVisible: true,
+            color,
+            source: "manual",
+          },
+        ];
+      });
       setPrompt("");
     } catch (err) {
       console.error("Error running segmentation:", err);
@@ -380,8 +539,91 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
         </div>
 
         <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <SectionTitle>Auto Segmentation From Report</SectionTitle>
+                <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                  {autoStatus === "idle" &&
+                    "Hệ thống sẽ tự đọc report, dùng LLM chọn target quan trọng, thử nhiều prompt và chọn mask tốt nhất."}
+                  {autoStatus === "extracting" &&
+                    "Đang đọc report và chuẩn bị auto segmentation..."}
+                  {autoStatus === "segmenting" &&
+                    "Đang thử các prompt candidates với VoxTell và kiểm tra mask..."}
+                  {autoStatus === "done" && "Auto segmentation đã sẵn sàng với prompt tốt nhất."}
+                  {autoStatus === "error" && "Auto segmentation chưa chạy được."}
+                </p>
+              </div>
+
+              {(autoStatus === "extracting" || autoStatus === "segmenting") && (
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-400" />
+              )}
+            </div>
+
+            {autoTop3.length > 0 && (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Top-3 selected by {autoSource || "LLM"}
+                </p>
+                <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-300">
+                  {autoTop3.map((item, index) => (
+                    <li key={`${item}-${index}`}>{item}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {autoPrompt && (
+              <div className="mt-2 rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-2 text-xs leading-relaxed text-indigo-100">
+                <span className="font-semibold text-indigo-200">Selected VoxTell prompt: </span>
+                {autoPrompt}
+              </div>
+            )}
+
+            {autoCandidateLogs.length > 0 && (
+              <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Prompt candidates
+                </p>
+                <div className="mt-2 space-y-1 text-xs leading-relaxed">
+                  {autoCandidateLogs.map((candidate, index) => (
+                    <div
+                      key={`${candidate.prompt}-${index}`}
+                      className={cx(
+                        "rounded-md border px-2 py-1.5",
+                        candidate.accepted
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-800 bg-slate-900/40 text-slate-400",
+                      )}
+                    >
+                      <span className="font-medium">
+                        {candidate.accepted ? "✅" : "•"} {candidate.prompt}
+                      </span>
+                      {typeof candidate.nonzero === "number" && (
+                        <span className="ml-2 text-slate-500">
+                          nonzero={candidate.nonzero}
+                        </span>
+                      )}
+                      {candidate.error && (
+                        <span className="ml-2 text-amber-300">
+                          error={candidate.error}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {autoError && (
+              <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-200">
+                {autoError}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
-            <SectionTitle>Text Prompt</SectionTitle>
+            <SectionTitle>Manual Text Prompt</SectionTitle>
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -409,7 +651,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
               ) : (
                 <>
                   <Play className="h-4 w-4 fill-current" />
-                  Run Segmentation
+                  Run Manual Segmentation
                 </>
               )}
             </button>
@@ -518,7 +760,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
           {segmentations.length === 0 ? (
             <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
-              Chưa có mask segmentation. Mỗi prompt mới sẽ được thêm vào danh sách mask hiện tại.
+              Chưa có mask segmentation. Auto mask sẽ xuất hiện trước; bác sĩ vẫn có thể nhập prompt thủ công để thêm mask mới.
             </div>
           ) : (
             <div className="space-y-2">
@@ -533,12 +775,31 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: segmentation.color }}
                       />
-                      <p
-                        className="truncate text-sm font-medium text-slate-300"
-                        title={segmentation.prompt}
-                      >
-                        {segmentation.prompt}
-                      </p>
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cx(
+                              "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]",
+                              segmentation.source === "auto"
+                                ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
+                                : "border-slate-600 bg-slate-900 text-slate-400",
+                            )}
+                          >
+                            {segmentation.source === "auto" ? "Auto" : "Manual"}
+                          </span>
+                          <p
+                            className="truncate text-sm font-medium text-slate-300"
+                            title={segmentation.prompt}
+                          >
+                            {segmentation.prompt}
+                          </p>
+                        </div>
+                        {segmentation.source === "auto" && segmentation.top3 && segmentation.top3.length > 0 && (
+                          <p className="mt-1 truncate text-[11px] text-slate-500">
+                            Top-3: {segmentation.top3.join("; ")}
+                          </p>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1">

@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react'
-import { flushSync } from 'react-dom'
 import { Send, Bot, User, MessageSquare, Loader2, Mic } from 'lucide-react'
 import type { AnalyzeResponse, ChatMessage } from '../types/api'
 import type { AnalysisStatus } from '../App'
@@ -7,7 +6,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { transcribeAudio } from '../lib/patientStore'
 
-const CHAT_BACKEND = "https://ai-demo-chat-service.nicesky-ba1698a3.southeastasia.azurecontainerapps.io"
+// DEV: Dùng "" → request đi qua Vite proxy (Node.js, same-origin, không bị browser buffer)
+// PROD: Dùng URL thật từ env hoặc Caddy reverse proxy cũng route same-origin
+const CHAT_BACKEND = import.meta.env.VITE_CHAT_SERVICE_URL ?? ""
 
 
 interface Props {
@@ -156,106 +157,178 @@ export default function ChatPanel({ result, reportId, cacheKey, status }: Props)
   }, [status, activeReportId, cacheKey])
 
   // 2. CẬP NHẬT LOGIC GỬI TIN NHẮN VỚI STREAMING (SSE)
-async function sendMessage() {
-  const text = input.trim()
-  if (!text || loading || status !== 'done') return
+  // ====================================================================
+  // FIX CUỐI CÙNG: Typewriter Queue
+  // Bất kể browser giao data kiểu gì (1 cục hay từng token), ta gom token
+  // vào hàng đợi rồi hiện ra từ từ bằng rAF. Mỗi frame hiện ~4 ký tự.
+  // Đây là kỹ thuật mà ChatGPT, Claude, Gemini UI đều sử dụng.
+  // ====================================================================
+  const tokenQueueRef = useRef<string[]>([])      // Hàng đợi token chờ hiển thị
+  const visibleTextRef = useRef('')                // Text đã hiện ra trên UI
+  const rafIdRef = useRef<number>(0)
+  const isStreamingRef = useRef(false)
+  const streamDoneRef = useRef(false)              // Network đã nhận xong chưa?
 
-  setMessages(prev => [
-    ...prev,
-    { role: 'user', content: text },
-    { role: 'assistant', content: '' }
-  ])
-  setInput('')
-  setLoading(true)
-  setIsStreaming(true)
-  setAgentStatus('Đang khởi tạo...')
+  function startTypewriter() {
+    const CHARS_PER_FRAME = 4  // ~240 chars/sec ở 60fps — tốc độ đọc tự nhiên
 
-  try {
-    const resp = await fetch(`${CHAT_BACKEND}/api/v1/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Conection': 'close',
-        // ✅ Bỏ 'Connection: keep-alive' — browser tự xử lý
-      },
-      body: JSON.stringify({
-        query: text,
-        report_id: activeReportId,
-        user_id: 'doctor_01',
-      }),
+    function tick() {
+      // Nếu queue còn token → lấy ra và hiện dần
+      if (tokenQueueRef.current.length > 0) {
+        // Lấy token đầu tiên trong queue
+        const nextToken = tokenQueueRef.current[0]
+
+        if (nextToken.length <= CHARS_PER_FRAME) {
+          // Token ngắn → hiện hết luôn
+          visibleTextRef.current += nextToken
+          tokenQueueRef.current.shift()
+        } else {
+          // Token dài → cắt ra hiện từng phần
+          visibleTextRef.current += nextToken.slice(0, CHARS_PER_FRAME)
+          tokenQueueRef.current[0] = nextToken.slice(CHARS_PER_FRAME)
+        }
+
+        // Cập nhật UI
+        const text = visibleTextRef.current
+        setMessages(prev => {
+          const newMsgs = [...prev]
+          newMsgs[newMsgs.length - 1] = {
+            ...newMsgs[newMsgs.length - 1],
+            content: text,
+          }
+          return newMsgs
+        })
+      }
+
+      // Tiếp tục loop nếu: còn token HOẶC network chưa xong
+      if (tokenQueueRef.current.length > 0 || !streamDoneRef.current) {
+        rafIdRef.current = requestAnimationFrame(tick)
+      } else {
+        // Cả queue rỗng VÀ network xong → kết thúc
+        isStreamingRef.current = false
+      }
+    }
+
+    rafIdRef.current = requestAnimationFrame(tick)
+  }
+
+  function stopTypewriter() {
+    streamDoneRef.current = true
+    // Nếu còn token trong queue → flush hết ra UI ngay lập tức
+    if (tokenQueueRef.current.length > 0) {
+      visibleTextRef.current += tokenQueueRef.current.join('')
+      tokenQueueRef.current = []
+    }
+    cancelAnimationFrame(rafIdRef.current)
+    const finalText = visibleTextRef.current
+    setMessages(prev => {
+      const newMsgs = [...prev]
+      newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: finalText }
+      return newMsgs
     })
+    isStreamingRef.current = false
+  }
 
-    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+  async function sendMessage() {
+    const text = input.trim()
+    if (!text || loading || status !== 'done') return
 
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let assistantMessage = ''
-    let buffer = ''
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: text },
+      { role: 'assistant', content: '' }
+    ])
+    setInput('')
+    setLoading(true)
+    setIsStreaming(true)
+    setAgentStatus('Đang khởi tạo...')
 
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
+    // Reset state
+    tokenQueueRef.current = []
+    visibleTextRef.current = ''
+    streamDoneRef.current = false
+    isStreamingRef.current = true
+    startTypewriter()
 
-      buffer += decoder.decode(value, { stream: true })
+    try {
+      const resp = await fetch(`${CHAT_BACKEND}/api/v1/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify({
+          query: text,
+          report_id: activeReportId,
+          user_id: 'doctor_01',
+        }),
+      })
 
-      // ✅ Split theo \n\n (SSE chuẩn), fallback \n
-      const events = buffer.split(/\n\n/)
-      buffer = events.pop() || '' // Giữ lại event chưa hoàn chỉnh
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
 
-      for (const event of events) {
-        // Mỗi event có thể có nhiều dòng (id:, event:, data:)
-        const lines = event.split('\n')
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-          const dataStr = line.slice(5).trim()
-          if (!dataStr || dataStr === '[DONE]') continue
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
 
-          try {
-            const payload = JSON.parse(dataStr)
+        buffer += decoder.decode(value, { stream: true })
 
-            if (payload.type === 'token') {
-              assistantMessage += payload.content
-              setAgentStatus('')
+        const events = buffer.split(/\n\n/)
+        buffer = events.pop() || ''
 
-              // ✅ setState thường — KHÔNG dùng flushSync
-              setMessages(prev => {
-                const newMsgs = [...prev]
-                newMsgs[newMsgs.length - 1] = {
-                  ...newMsgs[newMsgs.length - 1],
-                  content: assistantMessage,
-                }
-                return newMsgs
-              })
-            } else if (payload.type === 'status') {
-              setAgentStatus(payload.message)
-            } else if (payload.type === 'error') {
-              console.error('LangGraph error:', payload.message)
-              setAgentStatus('Có lỗi xảy ra!')
-            } else if (payload.type === 'done') {
-              setAgentStatus('')
+        for (const event of events) {
+          const lines = event.split('\n')
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue
+
+            const dataStr = line.slice(5).trim()
+            if (!dataStr || dataStr === '[DONE]') continue
+
+            try {
+              const payload = JSON.parse(dataStr)
+
+              if (payload.type === 'token') {
+                // ✅ Đẩy token vào hàng đợi — typewriter loop sẽ hiện dần
+                tokenQueueRef.current.push(payload.content)
+                setAgentStatus('')
+              } else if (payload.type === 'status') {
+                setAgentStatus(payload.message)
+              } else if (payload.type === 'error') {
+                console.error('LangGraph error:', payload.message)
+                setAgentStatus('Có lỗi xảy ra!')
+              } else if (payload.type === 'done') {
+                setAgentStatus('')
+              }
+            } catch {
+              // JSON chưa đủ — bình thường, bỏ qua
             }
-          } catch {
-            // JSON chưa đủ — bình thường, bỏ qua
           }
         }
       }
+    } catch (err) {
+      console.error(err)
+      tokenQueueRef.current = ['⚠️ Lỗi kết nối tới Server Chat.']
+    } finally {
+      // Đánh dấu network xong, nhưng typewriter loop vẫn tiếp tục
+      // cho đến khi queue rỗng
+      streamDoneRef.current = true
+
+      // Đợi typewriter hiện hết queue rồi mới tắt loading
+      const waitForQueue = () => {
+        if (tokenQueueRef.current.length === 0) {
+          setLoading(false)
+          setIsStreaming(false)
+          setAgentStatus('')
+        } else {
+          requestAnimationFrame(waitForQueue)
+        }
+      }
+      requestAnimationFrame(waitForQueue)
     }
-  } catch (err) {
-    console.error(err)
-    setMessages(prev => {
-      const newMsgs = [...prev]
-      newMsgs[newMsgs.length - 1].content = '⚠️ Lỗi kết nối tới Server Chat.'
-      return newMsgs
-    })
-  } finally {
-    setLoading(false)
-    setIsStreaming(false)
-    setAgentStatus('')
   }
-}
 
   const suggestions = result ? [
     ...(result.radiology?.detail ? ['Follow-up for this nodule?'] : []),

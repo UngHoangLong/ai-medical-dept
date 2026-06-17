@@ -1,6 +1,14 @@
 20-2-65-102.nip.io {
     # Route chat_service APIs to port 8001
-    reverse_proxy /api/v1/chat* localhost:8001
+    # flush_interval -1 = tắt buffering → SSE token stream ngay lập tức
+    # timeout 5 phút vì medical_agent có thể gọi MCP tools lâu
+    reverse_proxy /api/v1/chat* localhost:8001 {
+        flush_interval -1
+        transport http {
+            read_timeout 300s
+            write_timeout 300s
+        }
+    }
     reverse_proxy /api/v1/history* localhost:8001
     reverse_proxy /api/v1/threads* localhost:8001
 

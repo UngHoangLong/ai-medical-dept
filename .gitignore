@@ -69,3 +69,5 @@ docker-compose.override.yml
 
 
 .venv_mcp_server
+
+t.ipynb

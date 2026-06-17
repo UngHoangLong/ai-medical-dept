@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     # Khởi tạo các LLM
     llm = ChatOpenAI(model=settings.CHAT_MODEL, 
                      temperature=settings.LLM_TEMPERATURE_CHAT, 
-                     stream=settings.ENABLE_STREAMING, 
+                     streaming=settings.ENABLE_STREAMING, 
                      timeout=settings.LLM_TIMEOUT, 
                      max_retries=settings.LLM_MAX_RETRIES, 
                      api_key=settings.DEEPSEEK_API_KEY,
@@ -67,23 +67,25 @@ async def lifespan(app: FastAPI):
     await pool.close()
     print("🛑 Đã đóng kết nối Database.")
 
-
 # Đưa lifespan vào FastAPI
 app = FastAPI(title="LangGraph Agent Backend", lifespan=lifespan)
-# --- THÊM TOÀN BỘ ĐOẠN CODE NÀY VÀO ĐÂY ---
-# Danh sách các domain được phép gọi API (Frontend URL)
-origins = [
-    "http://localhost:5173",  # Cổng mặc định của React Vite
-    "http://127.0.0.1:5173",
-    # Mẹo: Sau này đem lên server thật, bạn thêm domain FE vào đây (vd: "https://medai.com")
-]
+
+# --- ĐOẠN CODE ĐÃ ĐƯỢC SỬA ĐỂ CHO PHÉP MỌI DOMAIN HOẶC THEO LIST ---
+# Nếu settings.CORS_ORIGINS là "*" thì origins = ["*"], ngược lại thì split theo dấu phẩy
+if settings.CORS_ORIGINS.strip() == "*":
+    origins = ["*"]
+else:
+    origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+# Lưu ý: Khi origins là ["*"], allow_credentials BẮT BUỘC phải là False thì FastAPI mới không bị lỗi.
+allow_all = "*" in origins
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,       # Cho phép các domain trong danh sách
-    allow_credentials=True,      # Cho phép gửi cookie/token (rất cần cho bảo mật sau này)
-    allow_methods=["*"],         # Cho phép tất cả các hàm (GET, POST, PUT, DELETE, OPTIONS...)
-    allow_headers=["*"],         # Cho phép tất cả các headers
+    allow_origins=origins, 
+    allow_credentials=not allow_all,  # Tự động chuyển thành False nếu mở cho tất cả (*), tránh crash app
+    allow_methods=["*"],         
+    allow_headers=["*"],         
 )
 # Gắn Router
 app.include_router(router)

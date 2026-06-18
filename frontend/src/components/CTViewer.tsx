@@ -83,7 +83,7 @@ async function readError(response: Response, fallback: string) {
   }
 }
 
-export default function CTViewer({ status, pid, seriesUid }: Props) {
+export default function CTViewer({ status, pid, seriesUid, className, style }: Props) {
   const downloadMenuRef = useRef<HTMLDivElement>(null);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -97,6 +97,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSegmentationControls, setShowSegmentationControls] = useState(true);
 
   const hasActivePatient = Boolean(pid && seriesUid);
   const activeViewLabel = getSliceTypeLabel(sliceType);
@@ -309,12 +310,14 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
   return (
     <section
+      style={style}
       className={cx(
-        "flex h-[calc(100vh-4.75rem)] min-h-[720px] w-[33.333vw] min-w-[380px] max-w-[640px] shrink-0 flex-col rounded-2xl border border-slate-800 bg-slate-950 font-sans text-slate-200 selection:bg-indigo-500/30",
+        "flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950 font-sans text-slate-200 selection:bg-indigo-500/30",
         isFullscreen ? "overflow-visible" : "overflow-hidden",
+        className
       )}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col">
         <div className="border-b border-slate-800 bg-slate-900/80 p-4 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -331,11 +334,22 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
               </div>
             </div>
 
-            {status && (
-              <span className="shrink-0 rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[10px] font-mono text-slate-400">
-                {status}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSegmentationControls((prev) => !prev)}
+                className="shrink-0 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-[10px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-150"
+                title={showSegmentationControls ? "Hide AI Segmentation controls" : "Show AI Segmentation controls"}
+              >
+                {showSegmentationControls ? "Hide AI Panel" : "Show AI Panel"}
+              </button>
+
+              {status && (
+                <span className="shrink-0 rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[10px] font-mono text-slate-400">
+                  {status}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
@@ -379,53 +393,57 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
           )}
         </div>
 
-        <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
-          <div className="space-y-2">
-            <SectionTitle>Text Prompt</SectionTitle>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="VD: left ventricle, tumor, lung nodule..."
-              className="h-16 w-full resize-none rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-            />
-            <button
-              type="button"
-              onClick={handleSegmentation}
-              disabled={
-                !pid ||
-                !seriesUid ||
-                !imageFile ||
-                !prompt.trim() ||
-                isProcessing ||
-                isLoadingVolume
-              }
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 fill-current" />
-                  Run Segmentation
-                </>
-              )}
-            </button>
+        {showSegmentationControls && (
+          <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
+            <div className="space-y-2">
+              <SectionTitle>Text Prompt</SectionTitle>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="VD: left ventricle, tumor, lung nodule..."
+                className="h-16 w-full resize-none rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+              />
+              <button
+                type="button"
+                onClick={handleSegmentation}
+                disabled={
+                  !pid ||
+                  !seriesUid ||
+                  !imageFile ||
+                  !prompt.trim() ||
+                  isProcessing ||
+                  isLoadingVolume
+                }
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 fill-current" />
+                    Run Segmentation
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <div
           className={cx(
             "min-h-0 bg-gradient-to-b from-slate-950 to-slate-900 p-3",
+            showSegmentationControls ? "" : "flex-1 flex flex-col",
             isFullscreen &&
             "fixed inset-0 z-[9999] h-screen w-screen max-w-none overflow-hidden bg-slate-950/95 p-4 backdrop-blur-xl",
           )}
         >
           <div
             className={cx(
-              "flex h-[500px] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl",
+              "flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl",
+              showSegmentationControls ? "h-[500px] min-h-[500px]" : "flex-1 min-h-[400px]",
               isFullscreen &&
               "!h-full !min-h-0 !w-full rounded-xl border-slate-700",
             )}
@@ -508,77 +526,79 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
           </div>
         </div>
 
-        <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <SectionTitle>Segmentations</SectionTitle>
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-              {segmentations.length}
-            </span>
-          </div>
-
-          {segmentations.length === 0 ? (
-            <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
-              Chưa có mask segmentation. Mỗi prompt mới sẽ được thêm vào danh sách mask hiện tại.
+        {showSegmentationControls && (
+          <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <SectionTitle>Segmentations</SectionTitle>
+              <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                {segmentations.length}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {segmentations.map((segmentation) => (
-                <div
-                  key={segmentation.id}
-                  className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: segmentation.color }}
-                      />
-                      <p
-                        className="truncate text-sm font-medium text-slate-300"
-                        title={segmentation.prompt}
-                      >
-                        {segmentation.prompt}
-                      </p>
-                    </div>
 
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleSegmentation(segmentation.id)}
-                        title={segmentation.isVisible ? "Hide" : "Show"}
-                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
-                      >
-                        {segmentation.isVisible ? (
-                          <Eye className="h-4 w-4" />
-                        ) : (
-                          <EyeOff className="h-4 w-4" />
-                        )}
-                      </button>
+            {segmentations.length === 0 ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
+                Chưa có mask segmentation. Mỗi prompt mới sẽ được thêm vào danh sách mask hiện tại.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {segmentations.map((segmentation) => (
+                  <div
+                    key={segmentation.id}
+                    className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: segmentation.color }}
+                        />
+                        <p
+                          className="truncate text-sm font-medium text-slate-300"
+                          title={segmentation.prompt}
+                        >
+                          {segmentation.prompt}
+                        </p>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDownload(segmentation)}
-                        title="Download"
-                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleSegmentation(segmentation.id)}
+                          title={segmentation.isVisible ? "Hide" : "Show"}
+                          className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                        >
+                          {segmentation.isVisible ? (
+                            <Eye className="h-4 w-4" />
+                          ) : (
+                            <EyeOff className="h-4 w-4" />
+                          )}
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => removeSegmentation(segmentation.id)}
-                        title="Remove"
-                        className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
-                      >
-                        ×
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownload(segmentation)}
+                          title="Download"
+                          className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => removeSegmentation(segmentation.id)}
+                          title="Remove"
+                          className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

@@ -16,9 +16,11 @@ interface Props {
   reportId: string | null
   cacheKey: string
   status: AnalysisStatus
+  className?: string
+  style?: React.CSSProperties
 }
 
-export default function ChatPanel({ result, reportId, cacheKey, status }: Props) {
+export default function ChatPanel({ result, reportId, cacheKey, status, className, style }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -320,7 +322,10 @@ export default function ChatPanel({ result, reportId, cacheKey, status }: Props)
   const isDisabled = status !== 'done'
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col bg-gray-900/60 rounded-2xl border border-white/8 overflow-hidden">
+    <aside
+      style={style}
+      className={`flex flex-col bg-gray-900/60 rounded-2xl border border-white/8 overflow-hidden ${className || ''}`}
+    >
       {/* Header */}
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
         <MessageSquare size={14} className="text-gray-500" />

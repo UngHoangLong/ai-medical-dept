@@ -26,6 +26,8 @@ interface Props {
   status?: AnalysisStatus;
   pid?: string | null;
   seriesUid?: string | null;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 type AutoCandidateLog = {
@@ -128,7 +130,7 @@ function decodeJsonHeader<T>(value: string | null, fallback: T): T {
   }
 }
 
-export default function CTViewer({ status, pid, seriesUid }: Props) {
+export default function CTViewer({ status, pid, seriesUid, className, style }: Props) {
   const downloadMenuRef = useRef<HTMLDivElement>(null);
   const autoRunKeyRef = useRef<string | null>(null);
 
@@ -143,6 +145,7 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSegmentationControls, setShowSegmentationControls] = useState(true);
 
   const [autoStatus, setAutoStatus] = useState<AutoStatus>("idle");
   const [autoTop3, setAutoTop3] = useState<string[]>([]);
@@ -468,12 +471,14 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
 
   return (
     <section
+      style={style}
       className={cx(
-        "flex h-[calc(100vh-4.75rem)] min-h-[720px] w-[33.333vw] min-w-[380px] max-w-[640px] shrink-0 flex-col rounded-2xl border border-slate-800 bg-slate-950 font-sans text-slate-200 selection:bg-indigo-500/30",
+        "flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-950 font-sans text-slate-200 selection:bg-indigo-500/30",
         isFullscreen ? "overflow-visible" : "overflow-hidden",
+        className
       )}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain flex flex-col">
         <div className="border-b border-slate-800 bg-slate-900/80 p-4 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -490,11 +495,22 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
               </div>
             </div>
 
-            {status && (
-              <span className="shrink-0 rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[10px] font-mono text-slate-400">
-                {status}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSegmentationControls((prev) => !prev)}
+                className="shrink-0 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-[10px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-150"
+                title={showSegmentationControls ? "Hide AI Segmentation controls" : "Show AI Segmentation controls"}
+              >
+                {showSegmentationControls ? "Hide AI Panel" : "Show AI Panel"}
+              </button>
+
+              {status && (
+                <span className="shrink-0 rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[10px] font-mono text-slate-400">
+                  {status}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
@@ -538,136 +554,140 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
           )}
         </div>
 
-        <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <SectionTitle>Auto Segmentation From Report</SectionTitle>
-                <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                  {autoStatus === "idle" &&
-                    "Hệ thống sẽ tự đọc report, dùng LLM chọn target quan trọng, thử nhiều prompt và chọn mask tốt nhất."}
-                  {autoStatus === "extracting" &&
-                    "Đang đọc report và chuẩn bị auto segmentation..."}
-                  {autoStatus === "segmenting" &&
-                    "Đang thử các prompt candidates với VoxTell và kiểm tra mask..."}
-                  {autoStatus === "done" && "Auto segmentation đã sẵn sàng với prompt tốt nhất."}
-                  {autoStatus === "error" && "Auto segmentation chưa chạy được."}
-                </p>
+        {showSegmentationControls && (
+          <div className="space-y-3 border-b border-slate-800 bg-slate-950/80 p-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <SectionTitle>Auto Segmentation From Report</SectionTitle>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                    {autoStatus === "idle" &&
+                      "Hệ thống sẽ tự đọc report, dùng LLM chọn target quan trọng, thử nhiều prompt và chọn mask tốt nhất."}
+                    {autoStatus === "extracting" &&
+                      "Đang đọc report và chuẩn bị auto segmentation..."}
+                    {autoStatus === "segmenting" &&
+                      "Đang thử các prompt candidates với VoxTell và kiểm tra mask..."}
+                    {autoStatus === "done" && "Auto segmentation đã sẵn sàng với prompt tốt nhất."}
+                    {autoStatus === "error" && "Auto segmentation chưa chạy được."}
+                  </p>
+                </div>
+
+                {(autoStatus === "extracting" || autoStatus === "segmenting") && (
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-400" />
+                )}
               </div>
 
-              {(autoStatus === "extracting" || autoStatus === "segmenting") && (
-                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-400" />
+              {autoTop3.length > 0 && (
+                <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Top-3 selected by {autoSource || "LLM"}
+                  </p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-300">
+                    {autoTop3.map((item, index) => (
+                      <li key={`${item}-${index}`}>{item}</li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {autoPrompt && (
+                <div className="mt-2 rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-2 text-xs leading-relaxed text-indigo-100">
+                  <span className="font-semibold text-indigo-200">Selected VoxTell prompt: </span>
+                  {autoPrompt}
+                </div>
+              )}
+
+              {autoCandidateLogs.length > 0 && (
+                <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Prompt candidates
+                  </p>
+                  <div className="mt-2 space-y-1 text-xs leading-relaxed">
+                    {autoCandidateLogs.map((candidate, index) => (
+                      <div
+                        key={`${candidate.prompt}-${index}`}
+                        className={cx(
+                          "rounded-md border px-2 py-1.5",
+                          candidate.accepted
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                            : "border-slate-800 bg-slate-900/40 text-slate-400",
+                        )}
+                      >
+                        <span className="font-medium">
+                          {candidate.accepted ? "✅" : "•"} {candidate.prompt}
+                        </span>
+                        {typeof candidate.nonzero === "number" && (
+                          <span className="ml-2 text-slate-500">
+                            nonzero={candidate.nonzero}
+                          </span>
+                        )}
+                        {candidate.error && (
+                          <span className="ml-2 text-amber-300">
+                            error={candidate.error}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {autoError && (
+                <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-200">
+                  {autoError}
+                </div>
               )}
             </div>
 
-            {autoTop3.length > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Top-3 selected by {autoSource || "LLM"}
-                </p>
-                <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-300">
-                  {autoTop3.map((item, index) => (
-                    <li key={`${item}-${index}`}>{item}</li>
-                  ))}
-                </ol>
-              </div>
-            )}
-
-            {autoPrompt && (
-              <div className="mt-2 rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-2 text-xs leading-relaxed text-indigo-100">
-                <span className="font-semibold text-indigo-200">Selected VoxTell prompt: </span>
-                {autoPrompt}
-              </div>
-            )}
-
-            {autoCandidateLogs.length > 0 && (
-              <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Prompt candidates
-                </p>
-                <div className="mt-2 space-y-1 text-xs leading-relaxed">
-                  {autoCandidateLogs.map((candidate, index) => (
-                    <div
-                      key={`${candidate.prompt}-${index}`}
-                      className={cx(
-                        "rounded-md border px-2 py-1.5",
-                        candidate.accepted
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                          : "border-slate-800 bg-slate-900/40 text-slate-400",
-                      )}
-                    >
-                      <span className="font-medium">
-                        {candidate.accepted ? "✅" : "•"} {candidate.prompt}
-                      </span>
-                      {typeof candidate.nonzero === "number" && (
-                        <span className="ml-2 text-slate-500">
-                          nonzero={candidate.nonzero}
-                        </span>
-                      )}
-                      {candidate.error && (
-                        <span className="ml-2 text-amber-300">
-                          error={candidate.error}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {autoError && (
-              <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-200">
-                {autoError}
-              </div>
-            )}
+            <div className="space-y-2">
+              <SectionTitle>Manual Text Prompt</SectionTitle>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="VD: left ventricle, tumor, lung nodule..."
+                className="h-16 w-full resize-none rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+              />
+              <button
+                type="button"
+                onClick={handleSegmentation}
+                disabled={
+                  !pid ||
+                  !seriesUid ||
+                  !imageFile ||
+                  !prompt.trim() ||
+                  isProcessing ||
+                  isLoadingVolume
+                }
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 fill-current" />
+                    Run Manual Segmentation
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-
-          <div className="space-y-2">
-            <SectionTitle>Manual Text Prompt</SectionTitle>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="VD: left ventricle, tumor, lung nodule..."
-              className="h-16 w-full resize-none rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
-            />
-            <button
-              type="button"
-              onClick={handleSegmentation}
-              disabled={
-                !pid ||
-                !seriesUid ||
-                !imageFile ||
-                !prompt.trim() ||
-                isProcessing ||
-                isLoadingVolume
-              }
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 fill-current" />
-                  Run Manual Segmentation
-                </>
-              )}
-            </button>
-          </div>
-        </div>
+        )}
 
         <div
           className={cx(
             "min-h-0 bg-gradient-to-b from-slate-950 to-slate-900 p-3",
+            showSegmentationControls ? "" : "flex-1 flex flex-col",
             isFullscreen &&
             "fixed inset-0 z-[9999] h-screen w-screen max-w-none overflow-hidden bg-slate-950/95 p-4 backdrop-blur-xl",
           )}
         >
           <div
             className={cx(
-              "flex h-[500px] min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl",
+              "flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl",
+              showSegmentationControls ? "h-[500px] min-h-[500px]" : "flex-1 min-h-[400px]",
               isFullscreen &&
               "!h-full !min-h-0 !w-full rounded-xl border-slate-700",
             )}
@@ -750,96 +770,98 @@ export default function CTViewer({ status, pid, seriesUid }: Props) {
           </div>
         </div>
 
-        <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <SectionTitle>Segmentations</SectionTitle>
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-              {segmentations.length}
-            </span>
-          </div>
-
-          {segmentations.length === 0 ? (
-            <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
-              Chưa có mask segmentation. Auto mask sẽ xuất hiện trước; bác sĩ vẫn có thể nhập prompt thủ công để thêm mask mới.
+        {showSegmentationControls && (
+          <div className="space-y-3 border-t border-slate-800 bg-slate-950/80 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <SectionTitle>Segmentations</SectionTitle>
+              <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                {segmentations.length}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {segmentations.map((segmentation) => (
-                <div
-                  key={segmentation.id}
-                  className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: segmentation.color }}
-                      />
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span
-                            className={cx(
-                              "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]",
-                              segmentation.source === "auto"
-                                ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
-                                : "border-slate-600 bg-slate-900 text-slate-400",
-                            )}
-                          >
-                            {segmentation.source === "auto" ? "Auto" : "Manual"}
-                          </span>
-                          <p
-                            className="truncate text-sm font-medium text-slate-300"
-                            title={segmentation.prompt}
-                          >
-                            {segmentation.prompt}
-                          </p>
+
+            {segmentations.length === 0 ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 text-xs text-slate-500">
+                Chưa có mask segmentation. Auto mask sẽ xuất hiện trước; bác sĩ vẫn có thể nhập prompt thủ công để thêm mask mới.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {segmentations.map((segmentation) => (
+                  <div
+                    key={segmentation.id}
+                    className="rounded-lg border border-slate-800 bg-slate-800/40 p-2.5 transition hover:border-slate-700"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: segmentation.color }}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={cx(
+                                "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]",
+                                segmentation.source === "auto"
+                                  ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
+                                  : "border-slate-600 bg-slate-900 text-slate-400",
+                              )}
+                            >
+                              {segmentation.source === "auto" ? "Auto" : "Manual"}
+                            </span>
+                            <p
+                              className="truncate text-sm font-medium text-slate-300"
+                              title={segmentation.prompt}
+                            >
+                              {segmentation.prompt}
+                            </p>
+                          </div>
+                          {segmentation.source === "auto" && segmentation.top3 && segmentation.top3.length > 0 && (
+                            <p className="mt-1 truncate text-[11px] text-slate-500">
+                              Top-3: {segmentation.top3.join("; ")}
+                            </p>
+                          )}
                         </div>
-                        {segmentation.source === "auto" && segmentation.top3 && segmentation.top3.length > 0 && (
-                          <p className="mt-1 truncate text-[11px] text-slate-500">
-                            Top-3: {segmentation.top3.join("; ")}
-                          </p>
-                        )}
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleSegmentation(segmentation.id)}
+                          title={segmentation.isVisible ? "Hide" : "Show"}
+                          className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                        >
+                          {segmentation.isVisible ? (
+                            <Eye className="h-4 w-4" />
+                          ) : (
+                            <EyeOff className="h-4 w-4" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownload(segmentation)}
+                          title="Download"
+                          className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => removeSegmentation(segmentation.id)}
+                          title="Remove"
+                          className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
+                        >
+                          ×
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleSegmentation(segmentation.id)}
-                        title={segmentation.isVisible ? "Hide" : "Show"}
-                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
-                      >
-                        {segmentation.isVisible ? (
-                          <Eye className="h-4 w-4" />
-                        ) : (
-                          <EyeOff className="h-4 w-4" />
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDownload(segmentation)}
-                        title="Download"
-                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-700 hover:text-slate-200"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => removeSegmentation(segmentation.id)}
-                        title="Remove"
-                        className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
-                      >
-                        ×
-                      </button>
-                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

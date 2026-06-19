@@ -131,6 +131,65 @@ _CALL_FNS = {
 }
 
 
+async def call_llm_json(
+    *,
+    system_prompt: str,
+    user_text: str,
+    retry_note: str = "",
+    max_tokens: int = 4096,
+    temperature: float = 0.0,
+    timeout: float = 30.0,
+    model: str | None = None,
+) -> str:
+    """Generic text-only LLM JSON call shared by highlighter and VoxTell auto prompt.
+
+    This reuses the same provider/client/env configuration as the highlighter:
+    HIGHLIGHTER_PROVIDER and HIGHLIGHTER_MODEL, unless `model` is passed.
+    It returns the raw JSON string from the model. The caller is responsible
+    for schema-specific parsing and fallback.
+    """
+    selected_model = model or MODEL
+    text = user_text + retry_note
+
+    if PROVIDER == "gemini":
+        from google.genai import types
+
+        resp = await _get_client().aio.models.generate_content(
+            model=selected_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=temperature,
+                response_mime_type="application/json",
+            ),
+        )
+        return resp.text or ""
+
+    if PROVIDER == "anthropic":
+        resp = await _get_client().messages.create(
+            model=selected_model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": text}],
+            timeout=timeout,
+        )
+        return resp.content[0].text
+
+    # Groq, OpenAI, OpenRouter and DeepSeek are OpenAI-compatible clients here.
+    resp = await _get_client().chat.completions.create(
+        model=selected_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+        temperature=temperature,
+        timeout=timeout,
+        response_format={"type": "json_object"},
+    )
+    return resp.choices[0].message.content or ""
+
+
 async def highlight_text(text: str | None) -> str | None:
     """Annotate 1 đoạn text. Trả về text gốc nếu lỗi hoặc model trả JSON sai format.
 

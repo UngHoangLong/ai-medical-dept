@@ -26,6 +26,7 @@ export interface OncologyAnswer {
 }
 
 export interface AnalyzeResponse {
+  report_id: string | null
   radiology: {
     screening: { answer: RadiologyScreeningAnswer }
     detail: { answer: RadiologyDetailAnswer } | null

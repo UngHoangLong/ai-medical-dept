@@ -171,18 +171,11 @@ export default function ChatPanel({ result, reportId, cacheKey, status, classNam
   const xhrRef = useRef<XMLHttpRequest | null>(null)
 
   function startTypewriter() {
-    const CHARS_PER_FRAME = 4
-
     function tick() {
       if (tokenQueueRef.current.length > 0) {
-        const nextToken = tokenQueueRef.current[0]
-        if (nextToken.length <= CHARS_PER_FRAME) {
-          visibleTextRef.current += nextToken
-          tokenQueueRef.current.shift()
-        } else {
-          visibleTextRef.current += nextToken.slice(0, CHARS_PER_FRAME)
-          tokenQueueRef.current[0] = nextToken.slice(CHARS_PER_FRAME)
-        }
+        // Gom tất cả token hiện có vào hiển thị ngay lập tức (không delay từng chữ)
+        visibleTextRef.current += tokenQueueRef.current.join('')
+        tokenQueueRef.current = []
 
         const text = visibleTextRef.current
         setMessages(prev => {
@@ -387,19 +380,14 @@ export default function ChatPanel({ result, reportId, cacheKey, status, classNam
                   : 'bg-blue-500/20 text-blue-100 rounded-tr-sm'
                   } whitespace-pre-wrap overflow-hidden`}>
 
-                  {/* Đang stream → text thường (nhanh). Xong → markdown (đẹp) */}
                   {msg.role === 'user' ? (
                     msg.content
                   ) : (
-                    isStreaming && i === messages.length - 1 ? (
-                      <span>{msg.content}<span className="animate-pulse">▍</span></span>
-                    ) : (
-                      <div className="markdown-body text-xs prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-800 prose-th:border-gray-600 prose-td:border-gray-700">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
-                    )
+                    <div className="markdown-body text-xs prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-800 prose-th:border-gray-600 prose-td:border-gray-700">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {msg.content + (isStreaming && i === messages.length - 1 ? ' ▍' : '')}
+                      </ReactMarkdown>
+                    </div>
                   )}
 
                 </div>

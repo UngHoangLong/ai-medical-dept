@@ -214,3 +214,23 @@ async def get_all_threads(request: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/history/{thread_id}")
+async def delete_chat_history(request: Request, thread_id: str):
+    """
+    API xóa lịch sử chat của một phiên (thread_id) cụ thể
+    """
+    try:
+        pool = request.state.db_pool
+        
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Xoá dữ liệu tương ứng với thread_id trong các bảng LangGraph Checkpoint
+                # (Không xoá checkpoint_migrations vì bảng đó dùng để quản lý schema database)
+                await cur.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
+                await cur.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,))
+                await cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
+                
+        return {"status": "success", "message": f"Đã xóa thành công lịch sử chat của thread_id: {thread_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

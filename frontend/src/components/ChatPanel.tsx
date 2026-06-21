@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, MessageSquare, Loader2, Mic } from 'lucide-react'
+import { Send, Bot, User, MessageSquare, Loader2, Mic, Trash2 } from 'lucide-react'
 import type { AnalyzeResponse, ChatMessage } from '../types/api'
 import type { AnalysisStatus } from '../App'
 import ReactMarkdown from 'react-markdown'
@@ -95,6 +95,27 @@ export default function ChatPanel({ result, reportId, cacheKey, status, classNam
         console.error('Failed to access microphone:', err)
         alert('Could not access microphone. Please check permissions.')
       }
+    }
+  }
+
+  async function clearHistory() {
+    if (status !== 'done' || activeReportId === 'unknown_report_id') return
+    if (!window.confirm('Bạn có chắc chắn muốn xóa lịch sử chat này không?')) return
+    
+    try {
+      const res = await fetch(`${CHAT_BACKEND}/api/v1/history/${activeReportId}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        setMessages([{
+          role: 'assistant',
+          content: 'Analysis complete! Ask me anything about this patient\'s CT scan results.',
+        }])
+      } else {
+        console.error('Failed to clear history')
+      }
+    } catch (error) {
+      console.error('Error clearing history:', error)
     }
   }
 
@@ -323,9 +344,20 @@ export default function ChatPanel({ result, reportId, cacheKey, status, classNam
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
         <MessageSquare size={14} className="text-gray-500" />
         <span className="text-xs font-medium text-gray-400">Ask AI</span>
-        {status === 'done' && (
-          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-400" />
-        )}
+        <div className="ml-auto flex items-center gap-3">
+          {status === 'done' && messages.length > 1 && (
+            <button
+              onClick={clearHistory}
+              title="Clear chat history"
+              className="text-gray-500 hover:text-red-400 transition-colors flex items-center justify-center"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+          {status === 'done' && (
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+          )}
+        </div>
       </div>
 
       {/* Body */}
